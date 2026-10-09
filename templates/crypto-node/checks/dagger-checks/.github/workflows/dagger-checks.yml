@@ -12,6 +12,11 @@ name: Dagger Checks
 # — never this file. Job-level context can't see step outputs, so the config
 # is resolved in the `config` job and consumed via needs.config.outputs.
 
+permissions:
+  # artifact handshake between live spans and the post-hoc export (actions:write upload / :read download)
+  actions: write
+  contents: read
+
 env:
   # In-cluster OTel collector (otel namespace) -> Tempo. Outbound-only.
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318

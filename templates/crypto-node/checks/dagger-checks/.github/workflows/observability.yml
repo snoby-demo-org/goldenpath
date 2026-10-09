@@ -18,7 +18,8 @@ on:
       - completed
 
 permissions:
-  actions: read
+  actions: write
+  contents: read
 
 jobs:
   export:
