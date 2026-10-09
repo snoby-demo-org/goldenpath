@@ -18,7 +18,7 @@ on:
 
 jobs:
   build-plane:
-    runs-on: dagger-build
+    runs-on: ${{ fromJSON(steps.cfg.outputs.planes).build }}
     outputs:
       has_test_checks: ${{ steps.cfg.outputs.test_checks != '' }}
     steps:
@@ -32,11 +32,13 @@ jobs:
           import yaml, os
           cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
           checks = cfg.get("checks", {})
+          planes = cfg.get("planes", {})
           build = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "build"]
           test  = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "test"]
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"build_checks={' '.join(build)}\n")
               f.write(f"test_checks={' '.join(test)}\n")
+              f.write(f"planes={json.dumps(planes)}\n")
           print("build plane:", build)
           print("test plane: ", test)
           EOF
@@ -65,7 +67,7 @@ jobs:
 
   test-plane:
     needs: build-plane
-    runs-on: k8s-test
+    runs-on: ${{ fromJSON(steps.cfg.outputs.planes).test }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

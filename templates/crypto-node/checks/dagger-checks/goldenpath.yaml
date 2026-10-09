@@ -13,6 +13,12 @@ pipeline:
   module: github.com/snoby-demo-org/dagger-checks
   registry: zot.viporlab.net/demo
 
+# Runner scale sets per plane. Defaults = the single existing org scale set.
+# When the two-plane topology lands, change to: build: dagger-build / test: k8s-test
+planes:
+  build: k8s-runner
+  test: k8s-runner
+
 checks:
   lint:              { enabled: true, plane: build }
   sast:              { enabled: true, plane: build }
