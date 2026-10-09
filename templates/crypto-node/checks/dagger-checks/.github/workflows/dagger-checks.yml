@@ -39,7 +39,7 @@ jobs:
       # inbound exposure; spans also carry traceparent for the post-hoc
       # workflow-level span to join the same trace.
       - name: OpenTelemetry job instrumentation
-        uses: snoby/opentelemetry-github/actions/instrument/job@main
+        uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
         with:
           self_monitoring: false # lab-only: never phone home
           secrets_to_redact: '{"github_token": "${{ github.token }}"}'

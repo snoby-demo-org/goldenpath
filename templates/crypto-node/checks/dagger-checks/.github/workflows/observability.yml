@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ values.runnerLabel }}
     steps:
       - name: Export workflow run trace
-        uses: snoby/opentelemetry-github/actions/instrument/workflow@main
+        uses: snoby/opentelemetry-github/actions/instrument/workflow@lab-patches
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318
         with:
