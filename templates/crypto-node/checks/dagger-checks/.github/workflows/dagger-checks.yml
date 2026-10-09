@@ -12,6 +12,11 @@ name: Dagger Checks
 # — never this file. Job-level context can't see step outputs, so the config
 # is resolved in the `config` job and consumed via needs.config.outputs.
 
+env:
+  # In-cluster OTel collector (otel namespace) -> Tempo. Outbound-only.
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+
 on:
   push:
     branches: [main]
@@ -28,6 +33,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Live per-job spans (queued -> in_progress -> steps -> completed) exported
+      # DURING the run, outbound to the in-cluster OTel collector -> Tempo. No
+      # inbound exposure; spans also carry traceparent for the post-hoc
+      # workflow-level span to join the same trace.
+      - name: OpenTelemetry job instrumentation
+        uses: snoby/opentelemetry-github/actions/instrument/job@main
+        with:
+          self_monitoring: false # lab-only: never phone home
+          secrets_to_redact: '{"github_token": "${{ github.token }}"}'
 
       - name: Load goldenpath config
         id: cfg

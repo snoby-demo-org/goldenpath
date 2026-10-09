@@ -1,0 +1,34 @@
+name: OpenTelemetry
+
+# Workflow-level CI trace export. Fires AFTER any goldenpath workflow run
+# completes and rebuilds the entire run as one trace (root=workflow run,
+# children=jobs, span events from logs) — including queue time, which the
+# live per-job spans (instrumented inside dagger-checks.yml) can't see.
+# The live spans and this post-hoc tree share trace IDs via the traceparent
+# artifact the job instrumentation uploads.
+#
+# All export is OUTBOUND from the runner to the in-cluster OTel collector
+# (otel namespace) -> Tempo. No inbound network exposure is required.
+
+on:
+  workflow_run:
+    workflows:
+      - Dagger Checks
+    types:
+      - completed
+
+permissions:
+  actions: read
+
+jobs:
+  export:
+    runs-on: ${{ values.runnerLabel }}
+    steps:
+      - name: Export workflow run trace
+        uses: snoby/opentelemetry-github/actions/instrument/workflow@main
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318
+        with:
+          self_monitoring: false # lab-only: never phone home
+          workflow_run_id: ${{ github.event.workflow_run.id }}
+          workflow_run_attempt: ${{ github.event.workflow_run.run_attempt }}
