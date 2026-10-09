@@ -3,12 +3,14 @@ name: Dagger Checks
 # Config-driven golden-path pipeline. Reads .github/goldenpath.yaml and runs
 # enabled checks on the right plane:
 #
-#   build plane (dagger-build runners): node-local always-on Dagger engine,
-#     warm cache, pushes image digest to the zot registry.
-#   test plane (k8s-test runners): pulls the digest the build plane pushed
-#     and runs the test suite. No engine-cache dependency.
+#   build plane: runner scale set from planes.build — node-local always-on
+#     Dagger engine, warm cache, pushes image digest to the zot registry.
+#   test plane: runner scale set from planes.test — receives the digest the
+#     build plane pushed and runs the test suite. No engine-cache dependency.
 #
-# Enable/disable a check by editing .github/goldenpath.yaml — never this file.
+# Enable/disable a check or change its plane by editing .github/goldenpath.yaml
+# — never this file. Job-level context can't see step outputs, so the config
+# is resolved in the `config` job and consumed via needs.config.outputs.
 
 on:
   push:
@@ -17,10 +19,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-plane:
-    runs-on: ${{ fromJSON(steps.cfg.outputs.planes).build }}
+  config:
+    runs-on: ${{ values.runnerLabel }}
     outputs:
-      has_test_checks: ${{ steps.cfg.outputs.test_checks != '' }}
+      build_checks: ${{ steps.cfg.outputs.build_checks }}
+      test_checks: ${{ steps.cfg.outputs.test_checks }}
+      planes: ${{ steps.cfg.outputs.planes }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +33,7 @@ jobs:
         id: cfg
         run: |
           python3 - <<'EOF'
-          import yaml, os
+          import yaml, os, json
           cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
           checks = cfg.get("checks", {})
           planes = cfg.get("planes", {})
@@ -43,61 +47,61 @@ jobs:
           print("test plane: ", test)
           EOF
 
+  build-plane:
+    needs: config
+    runs-on: ${{ fromJSON(needs.config.outputs.planes).build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Run build-plane checks (dagger)
-        if: steps.cfg.outputs.build_checks != ''
+        if: needs.config.outputs.build_checks != ''
         run: |
           MODULE="${{ values.daggerModule }}"
-          for check in ${{ steps.cfg.outputs.build_checks }}; do
+          for check in ${{ needs.config.outputs.build_checks }}; do
             echo "::group::[$check]"
             dagger call --mod "$MODULE" "$check" --source=.
             echo "::endgroup::"
           done
 
       - name: Capture image digest handoff
+        if: contains(needs.config.outputs.build_checks, 'build')
         run: |
           MODULE="${{ values.daggerModule }}"
           dagger call --mod "$MODULE" build --source=. | tee digest.log
           grep -o 'sha256:[a-f0-9]*' digest.log | tail -1 > digest.txt
 
       - name: Upload digest artifact (build -> test handoff)
+        if: contains(needs.config.outputs.build_checks, 'build')
         uses: actions/upload-artifact@v4
         with:
           name: image-digest
           path: digest.txt
 
   test-plane:
-    needs: build-plane
-    runs-on: ${{ fromJSON(steps.cfg.outputs.planes).test }}
+    needs: [config, build-plane]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ${{ fromJSON(needs.config.outputs.planes).test }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Download digest handoff
+        if: needs.config.outputs.test_checks != ''
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: image-digest
 
       - name: Resolve image from registry
-        run: echo "test plane pulls $(cat digest.txt) from zot.viporlab.net"
-
-      - name: Load goldenpath config (test checks)
-        id: cfg
-        run: |
-          python3 - <<'EOF'
-          import yaml, os
-          cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
-          checks = cfg.get("checks", {})
-          test = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "test"]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"test_checks={' '.join(test)}\n")
-          print("test plane:", test)
-          EOF
+        if: needs.config.outputs.test_checks != ''
+        run: echo "test plane pulls $(cat digest.txt 2>/dev/null || echo 'no digest') from zot.viporlab.net"
 
       - name: Run test-plane checks (dagger)
-        if: steps.cfg.outputs.test_checks != ''
+        if: needs.config.outputs.test_checks != ''
         run: |
           MODULE="${{ values.daggerModule }}"
-          for check in ${{ steps.cfg.outputs.test_checks }}; do
+          for check in ${{ needs.config.outputs.test_checks }}; do
             echo "::group::[$check]"
             dagger call --mod "$MODULE" "$check" --source=.
             echo "::endgroup::"
