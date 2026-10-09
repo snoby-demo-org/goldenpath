@@ -79,6 +79,8 @@ jobs:
 
       - name: Run build-plane checks (dagger)
         if: needs.config.outputs.build_checks != ''
+        env:
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build-plane"
         run: |
           MODULE="${{ values.daggerModule }}"
           for check in ${{ needs.config.outputs.build_checks }}; do
@@ -89,6 +91,8 @@ jobs:
 
       - name: Capture image digest handoff
         if: contains(needs.config.outputs.build_checks, 'build')
+        env:
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build-plane"
         run: |
           MODULE="${{ values.daggerModule }}"
           dagger call --mod "$MODULE" build --source=. | tee digest.log
@@ -122,6 +126,8 @@ jobs:
 
       - name: Run test-plane checks (dagger)
         if: needs.config.outputs.test_checks != ''
+        env:
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=test-plane"
         run: |
           MODULE="${{ values.daggerModule }}"
           for check in ${{ needs.config.outputs.test_checks }}; do
