@@ -29,6 +29,7 @@ jobs:
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318
         with:
+          github_token: ${{ github.token }}
           self_monitoring: false # lab-only: never phone home
           workflow_run_id: ${{ github.event.workflow_run.id }}
           workflow_run_attempt: ${{ github.event.workflow_run.run_attempt }}
