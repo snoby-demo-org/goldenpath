@@ -158,10 +158,15 @@ spec:
           default: true
           description: Cheap well-formedness gate on push/PR.
         checkDagger:
-          title: Dagger lint + PII scan (dagger-checks.yml)
+          title: Dagger checks (dagger-checks.yml)
           type: boolean
           default: true
-          description: Runs snoby/dagger-checks against the repo on the shared Dagger engine.
+          description: Config-driven two-plane pipeline (build plane + test plane) via snoby-demo-org/dagger-checks.
+        daggerModule:
+          title: Dagger checks module
+          type: string
+          description: Shared Dagger module the pipeline dispatches to
+          default: github.com/snoby-demo-org/dagger-checks
         checkSmoke:
           title: Smoke test (smoke.yml)
           type: boolean
@@ -230,6 +235,7 @@ spec:
         url: ./checks/dagger-checks
         values:
           runnerLabel: ${{ parameters.runnerLabel }}
+          daggerModule: ${{ parameters.daggerModule }}
 
     - id: checkSmoke
       name: Add smoke test workflow

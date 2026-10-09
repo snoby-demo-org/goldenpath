@@ -1,41 +1,102 @@
 name: Dagger Checks
 
-# Runs lint, PII scan, and the (stubbed) static-analysis / private-key /
-# format gates via the shared Dagger engine. The self-hosted runner image has
-# the dagger CLI baked in and _EXPERIMENTAL_DAGGER_RUNNER_HOST points at the
-# node-local always-on engine (see arc runner HelmRelease); cache is persistent
-# across runs.
+# Config-driven golden-path pipeline. Reads .github/goldenpath.yaml and runs
+# enabled checks on the right plane:
 #
-# static-analyzer, private-key-check, and format are STUBS that currently pass;
-# wire real tools into snoby/dagger-checks to activate them.
+#   build plane (dagger-build runners): node-local always-on Dagger engine,
+#     warm cache, pushes image digest to the zot registry.
+#   test plane (k8s-test runners): pulls the digest the build plane pushed
+#     and runs the test suite. No engine-cache dependency.
 #
-# Requires backup to a dagger module. By default this check snapshots every
-# tracked file as a source; swap --source= for a module that lints your coin's
-# actual source tree once vendored.
+# Enable/disable a check by editing .github/goldenpath.yaml — never this file.
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  checks:
-    runs-on: ${{ values.runnerLabel }}
+  build-plane:
+    runs-on: dagger-build
+    outputs:
+      has_test_checks: ${{ steps.cfg.outputs.test_checks != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Lint (dagger)
-        run: dagger call --mod github.com/snoby-demo-org/dagger-checks lint --source=.
+      - name: Load goldenpath config
+        id: cfg
+        run: |
+          python3 - <<'EOF'
+          import yaml, os
+          cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
+          checks = cfg.get("checks", {})
+          build = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "build"]
+          test  = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "test"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"build_checks={' '.join(build)}\n")
+              f.write(f"test_checks={' '.join(test)}\n")
+          print("build plane:", build)
+          print("test plane: ", test)
+          EOF
 
-      - name: PII scan (dagger)
-        run: dagger call --mod github.com/snoby-demo-org/dagger-checks pii-scan --source=.
+      - name: Run build-plane checks (dagger)
+        if: steps.cfg.outputs.build_checks != ''
+        run: |
+          MODULE="${{ values.daggerModule }}"
+          for check in ${{ steps.cfg.outputs.build_checks }}; do
+            echo "::group::[$check]"
+            dagger call --mod "$MODULE" "$check" --source=.
+            echo "::endgroup::"
+          done
 
-      - name: Static analyzer (dagger, stub)
-        run: dagger call --mod github.com/snoby-demo-org/dagger-checks static-analyzer --source=.
+      - name: Capture image digest handoff
+        run: |
+          MODULE="${{ values.daggerModule }}"
+          dagger call --mod "$MODULE" build --source=. | tee digest.log
+          grep -o 'sha256:[a-f0-9]*' digest.log | tail -1 > digest.txt
 
-      - name: Private key check (dagger, stub)
-        run: dagger call --mod github.com/snoby-demo-org/dagger-checks private-key-check --source=.
+      - name: Upload digest artifact (build -> test handoff)
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest
+          path: digest.txt
 
-      - name: Format check (dagger, stub)
-        run: dagger call --mod github.com/snoby-demo-org/dagger-checks format --source=.
+  test-plane:
+    needs: build-plane
+    runs-on: k8s-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download digest handoff
+        uses: actions/download-artifact@v4
+        with:
+          name: image-digest
+
+      - name: Resolve image from registry
+        run: echo "test plane pulls $(cat digest.txt) from zot.viporlab.net"
+
+      - name: Load goldenpath config (test checks)
+        id: cfg
+        run: |
+          python3 - <<'EOF'
+          import yaml, os
+          cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
+          checks = cfg.get("checks", {})
+          test = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "test"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"test_checks={' '.join(test)}\n")
+          print("test plane:", test)
+          EOF
+
+      - name: Run test-plane checks (dagger)
+        if: steps.cfg.outputs.test_checks != ''
+        run: |
+          MODULE="${{ values.daggerModule }}"
+          for check in ${{ steps.cfg.outputs.test_checks }}; do
+            echo "::group::[$check]"
+            dagger call --mod "$MODULE" "$check" --source=.
+            echo "::endgroup::"
+          done

@@ -1,0 +1,23 @@
+# Golden Path pipeline configuration — the ONLY file a repo owns to drive
+# its CI. The dagger-checks workflow is generic; this config decides which
+# checks run and on which runner plane.
+#
+# planes:
+#   build — dagger-build runner scale set: pinned node with the always-on
+#           Dagger engine (warm cache) + zot registry access.
+#   test  — k8s-test runner scale set: unpinned nodes; receives the built
+#           image digest from the build plane via the registry artifact
+#           handoff. No engine-cache dependency.
+
+pipeline:
+  module: github.com/snoby-demo-org/dagger-checks
+  registry: zot.viporlab.net/demo
+
+checks:
+  lint:              { enabled: true, plane: build }
+  sast:              { enabled: true, plane: build }
+  pii-scan:          { enabled: true, plane: build }
+  format:            { enabled: true, plane: build }
+  private-key-check: { enabled: true, plane: build }
+  build:             { enabled: true, plane: build }
+  test:              { enabled: true, plane: test }
