@@ -1,16 +1,25 @@
 name: Dagger Checks
 
-# Config-driven golden-path pipeline. Reads .github/goldenpath.yaml and runs
-# enabled checks on the right plane:
+# Config-driven golden-path pipeline. Reads .github/goldenpath.yaml and fans
+# every enabled check out onto its OWN parallel runner pod, on the plane that
+# the config assigns it to:
 #
-#   build plane: runner scale set from planes.build — node-local always-on
-#     Dagger engine, warm cache, pushes image digest to the zot registry.
-#   test plane: runner scale set from planes.test — receives the digest the
-#     build plane pushed and runs the test suite. No engine-cache dependency.
+#   build-checks (matrix): every enabled build-plane check EXCEPT `build` =
+#     one parallel ARC runner pod, own process / own engine session. Source
+#     scans (lint, sast, pii-scan, format, private-key-check) launch
+#     immediately in parallel — no dependency on the image build.
+#   build (digest producer): pushes the real image to the zot registry and
+#     captures its digest — the handoff contract to the test plane.
+#   test-checks (matrix): every enabled test-plane check = one parallel ARC
+#     runner pod, gated on the build producing a digest. No engine-cache dep.
 #
-# Enable/disable a check or change its plane by editing .github/goldenpath.yaml
-# — never this file. Job-level context can't see step outputs, so the config
-# is resolved in the `config` job and consumed via needs.config.outputs.
+# The matrix is built 100% from .github/goldenpath.yaml (the ONLY file a repo
+# owns): every check listed there becomes one matrix element = one runner pod,
+# running in parallel. Add/remove/enable/disable a check by editing
+# goldenpath.yaml — never this file.
+#
+# Job-level context can't see step outputs, so the config is resolved in the
+# `config` job and consumed via needs.config.outputs (JSON for the matrix).
 
 permissions:
   # artifact handshake between live spans and the post-hoc export (actions:write upload / :read download)
@@ -34,9 +43,10 @@ jobs:
   config:
     runs-on: ${{ values.runnerLabel }}
     outputs:
-      build_checks: ${{ steps.cfg.outputs.build_checks }}
+      scan_checks: ${{ steps.cfg.outputs.scan_checks }}
       test_checks: ${{ steps.cfg.outputs.test_checks }}
       planes: ${{ steps.cfg.outputs.planes }}
+      build_enabled: ${{ steps.cfg.outputs.build_enabled }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,78 +70,117 @@ jobs:
           cfg = yaml.safe_load(open(".github/goldenpath.yaml"))
           checks = cfg.get("checks", {})
           planes = cfg.get("planes", {})
-          build = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "build"]
-          test  = [k for k, v in checks.items() if v.get("enabled") and v.get("plane") == "test"]
+          enabled = {k: v for k, v in checks.items() if v.get("enabled")}
+          # Every enabled build-plane check EXCEPT `build` becomes a parallel
+          # scan pod. `build` is the digest producer (push + capture digest) —
+          # it owns the handoff contract, so it is its own job, not in the matrix.
+          scan_checks = [k for k, v in enabled.items() if v.get("plane") == "build" and k != "build"]
+          test_checks = [k for k, v in enabled.items() if v.get("plane") == "test"]
+          build_enabled = bool(enabled.get("build", {}).get("enabled"))
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"build_checks={' '.join(build)}\n")
-              f.write(f"test_checks={' '.join(test)}\n")
+              f.write(f"scan_checks={json.dumps(scan_checks)}\n")
+              f.write(f"test_checks={json.dumps(test_checks)}\n")
               f.write(f"planes={json.dumps(planes)}\n")
-          print("build plane:", build)
-          print("test plane: ", test)
+              f.write(f"build_enabled={str(build_enabled).lower()}\n")
+          print("build scan pods:", scan_checks)
+          print("build producer :", build_enabled)
+          print("test pods      :", test_checks)
           EOF
 
-  build-plane:
+  # Every build-plane scan check = one parallel ARC runner pod (own process /
+  # own engine session), all launched immediately, none waiting on `build`.
+  # Source-scope scans have no `needs: build` — they start in parallel with it.
+  build-checks:
     needs: config
+    if: needs.config.outputs.scan_checks != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(needs.config.outputs.scan_checks) }}
     runs-on: ${{ fromJSON(needs.config.outputs.planes).build }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run build-plane checks (dagger)
-        if: needs.config.outputs.build_checks != ''
-        env:
-          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build-plane"
-        run: |
-          MODULE="${{ values.daggerModule }}"
-          for check in ${{ needs.config.outputs.build_checks }}; do
-            echo "::group::[$check]"
-            dagger call --mod "$MODULE" "$check" --source=.
-            echo "::endgroup::"
-          done
+      - name: OpenTelemetry job instrumentation
+        uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
+        with:
+          github_token: ${{ github.token }}
+          self_monitoring: false
+          secrets_to_redact: '{"github_token": "${{ github.token }}"}'
 
-      - name: Capture image digest handoff
-        if: contains(needs.config.outputs.build_checks, 'build')
+      - name: Run check [${{ matrix.check }}]
         env:
-          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build-plane"
+          # Tag this check's trace with the GH run id + the check name so Tempo
+          # can filter per-check traces per run, per job.
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/${{ matrix.check }}"
         run: |
-          MODULE="${{ values.daggerModule }}"
-          dagger call --mod "$MODULE" build --source=. | tee digest.log
+          dagger call --mod "${{ values.daggerModule }}" "${{ matrix.check }}" --source=.
+
+  # Digest producer: builds the real image, pushes to the zot registry, captures
+  # the real digest as the handoff artifact the test plane consumes. Launches in
+  # parallel with the build-checks scan fan-out (no `needs: build-checks`).
+  build:
+    needs: config
+    if: needs.config.outputs.build_enabled == 'true'
+    runs-on: ${{ fromJSON(needs.config.outputs.planes).build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: OpenTelemetry job instrumentation
+        uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
+        with:
+          github_token: ${{ github.token }}
+          self_monitoring: false
+          secrets_to_redact: '{"github_token": "${{ github.token }}"}'
+
+      - name: Build image and capture digest
+        env:
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/build"
+        run: |
+          dagger call --mod "${{ values.daggerModule }}" build --source=. | tee digest.log
           grep -o 'sha256:[a-f0-9]*' digest.log | tail -1 > digest.txt
+          echo "produced digest: $(cat digest.txt)"
 
       - name: Upload digest artifact (build -> test handoff)
-        if: contains(needs.config.outputs.build_checks, 'build')
         uses: actions/upload-artifact@v4
         with:
           name: image-digest
           path: digest.txt
 
-  test-plane:
-    needs: [config, build-plane]
-    if: ${{ !failure() && !cancelled() }}
+  # Every test-plane check = one parallel ARC runner pod, gated on the build
+  # plane having produced a digest. Unconditional on the individual scan results
+  # (a failed scan does not cancel its siblings).
+  test-checks:
+    needs: [config, build]
+    if: ${{ !cancelled() && needs.config.outputs.test_checks != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(needs.config.outputs.test_checks) }}
     runs-on: ${{ fromJSON(needs.config.outputs.planes).test }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: OpenTelemetry job instrumentation
+        uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
+        with:
+          github_token: ${{ github.token }}
+          self_monitoring: false
+          secrets_to_redact: '{"github_token": "${{ github.token }}"}'
+
       - name: Download digest handoff
-        if: needs.config.outputs.test_checks != ''
-        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: image-digest
 
       - name: Resolve image from registry
-        if: needs.config.outputs.test_checks != ''
         run: echo "test plane pulls $(cat digest.txt 2>/dev/null || echo 'no digest') from zot.viporlab.net"
 
-      - name: Run test-plane checks (dagger)
-        if: needs.config.outputs.test_checks != ''
+      - name: Run check [${{ matrix.check }}]
         env:
-          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=test-plane"
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=test/${{ matrix.check }}"
         run: |
-          MODULE="${{ values.daggerModule }}"
-          for check in ${{ needs.config.outputs.test_checks }}; do
-            echo "::group::[$check]"
-            dagger call --mod "$MODULE" "$check" --source=.
-            echo "::endgroup::"
-          done
+          dagger call --mod "${{ values.daggerModule }}" "${{ matrix.check }}" --source=.
