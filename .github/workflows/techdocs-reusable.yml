@@ -1,0 +1,101 @@
+name: TechDocs Publish (shared)
+
+# Reusable TechDocs pipeline — the single source of truth for generating and
+# publishing Backstage TechDocs to the homelab MinIO (S3) bucket.
+#
+# Callers pass ONLY their repo-level secrets; generation/publish logic lives
+# here so a fix or version bump lands once for every onboarded repo.
+#
+# Caller shape (this is the ENTIRE per-repo workflow):
+#   jobs:
+#     publish:
+#       uses: snoby-demo-org/goldenpath/.github/workflows/techdocs-reusable.yml@main
+#       secrets:
+#         TECH_DOCS_ACCESS_KEY: ${{ secrets.TECH_DOCS_ACCESS_KEY }}
+#         TECH_DOCS_SECRET_KEY: ${{ secrets.TECH_DOCS_SECRET_KEY }}
+#         TECH_DOCS_S3_ENDPOINT: ${{ secrets.TECH_DOCS_S3_ENDPOINT }}
+#
+# Inputs (both optional):
+#   runner   - ARC runner label (default: k8s-runner)
+#   entities - multi-line list of entity refs (default/<kind>/<name>) to publish
+#              the same rendered site under. Empty = derive the single ref from
+#              the caller's catalog-info.yaml.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Self-hosted runner label'
+        type: string
+        default: k8s-runner
+      entities:
+        description: 'Optional multi-line entity refs (default/<kind>/<name>); empty = derive from catalog-info.yaml'
+        type: string
+        default: ''
+    secrets:
+      TECH_DOCS_ACCESS_KEY:
+        required: true
+      TECH_DOCS_SECRET_KEY:
+        required: true
+      TECH_DOCS_S3_ENDPOINT:
+        required: true
+
+jobs:
+  publish:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install techdocs-cli + mkdocs
+        run: |
+          npm install -g @techdocs/cli
+          pip install mkdocs-techdocs-core
+
+      - name: Resolve entity refs
+        id: refs
+        env:
+          ENTITIES_INPUT: ${{ inputs.entities }}
+        run: |
+          if [ -n "$ENTITIES_INPUT" ]; then
+            printf '%s\n' "$ENTITIES_INPUT" > refs.txt
+          else
+            NAME=$(grep -E '^[[:space:]]+name:' catalog-info.yaml | head -1 | awk '{print $2}')
+            KIND=$(grep -E '^kind:' catalog-info.yaml | head -1 | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
+            NS=$(grep -E '^[[:space:]]*namespace:' catalog-info.yaml | head -1 | awk '{print $2}')
+            NS=${NS:-default}
+            echo "default/${KIND}/${NAME}" > refs.txt
+          fi
+          echo '--- entity refs to publish ---'
+          cat refs.txt
+
+      - name: Generate TechDocs
+        run: techdocs-cli generate --no-docker --verbose
+
+      - name: Publish TechDocs to MinIO
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TECH_DOCS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TECH_DOCS_SECRET_KEY }}
+          AWS_REGION: us-east-1
+          # Custom S3 endpoint (MinIO) — read via env, not a CLI flag.
+          AWS_ENDPOINT_URL: ${{ secrets.TECH_DOCS_S3_ENDPOINT }}
+        run: |
+          while IFS= read -r ENTITY; do
+            [ -z "$ENTITY" ] && continue
+            techdocs-cli publish \
+              --publisher-type awsS3 \
+              --storage-name techdocs \
+              --entity "$ENTITY" \
+              --awsBucketRootPath ''
+            echo "Published $ENTITY"
+          done < refs.txt
