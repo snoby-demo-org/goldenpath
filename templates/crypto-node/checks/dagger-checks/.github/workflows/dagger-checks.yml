@@ -139,8 +139,12 @@ jobs:
         env:
           OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/build,github.actions.commit=${{ github.sha }}"
         run: |
-          dagger call --mod "${{ values.daggerModule }}" build --source=. | tee digest.log
-          grep -o 'sha256:[a-f0-9]*' digest.log | tail -1 > digest.txt
+          # No shell pipes here: the otel-shell job instrumentation wraps every
+          # pipeline stage in fifo tee/wc plumbing that intermittently never
+          # closes, leaving the reader (tail/tee) waiting for EOF forever.
+          dagger call --mod "${{ values.daggerModule }}" build --source=. > digest.log
+          cat digest.log
+          awk 'match($0,/sha256:[a-f0-9]+/){d=substr($0,RSTART,RLENGTH)} END{print d}' digest.log > digest.txt
           echo "produced digest: $(cat digest.txt)"
 
       - name: Upload digest artifact (build -> test handoff)
