@@ -18,6 +18,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  # Quieter progress for CI: 'dots' collapses dagger's span tree to one-char
+  # markers and keeps the checks' actual log lines (github-logs-to-loki tags
+  # those as log_category=check-output; dagger plumbing = dagger-progress).
+  DAGGER_PROGRESS: dots
+  # Suppress the dagger.cloud "Setup tracing" nag line
+  DAGGER_NO_NAG: "1"
+
 jobs:
   checks:
     runs-on: ${{ values.runnerLabel }}
