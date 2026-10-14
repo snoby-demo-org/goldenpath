@@ -7,6 +7,7 @@ spec:
   targets:
     - ./templates/civicnet-node/template.yaml
     - ./templates/crypto-node/template.yaml
+    - ./templates/truenorth/template.yaml
     - ./templates/golden-path/template.yaml
     - ./system-goldenpath.yaml
     - ./system-civicnet.yaml

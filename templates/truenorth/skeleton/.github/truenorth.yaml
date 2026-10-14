@@ -1,0 +1,51 @@
+# TrueNorth check model — the ONLY file this repo owns to drive its CI
+# (FR-58: the truenorth.yaml / check-selection file, adjacent to catalog-info.yaml).
+# The dagger-checks workflow is generic; this config decides which checks run,
+# on which runner plane, and under which enforcement mode.
+#
+# Check model (FR-58/FR-59):
+#   mode: required   — always on, can never be disabled or downgraded (PII, secrets).
+#                      Disabling one is a HARD STOP; failure is never overridable (FR-71).
+#   mode: blocking   — gates the build when enabled; failure blocks unless a declared,
+#                      auditable exception exists (.github/truenorth-exceptions.yaml, FR-13).
+#   mode: advisory   — records findings that feed the error budget; never blocks.
+#   enabled: false   — check does not run at all for this service (FR-10); freely
+#                      allowed for non-required checks, no flag.
+#   tier:  fast      — runs on every push (FR-16).
+#   tier:  heavy     — runs only on explicit deep-scan trigger: workflow_dispatch
+#                      input, commit trailer "Deep-Scan: true", or PR label "deep-scan".
+#   plane: build|test — runner scale set routing; test-plane checks consume the
+#                      build digest handoff.
+#   applies: [stack] — applicability declaration (FR-58); "any" applies everywhere.
+#
+# The enforcement gates (stops on required/blocking, continues on advisory) are
+# unit-tested — .github/truenorth_report.py + tests/ run on every push and the
+# build-report BLOCKS the run if the tests fail.
+
+pipeline:
+  module: ${{ values.daggerModule }}
+  registry: ${{ values.registry }}
+
+planes:
+  build: ${{ values.buildPlane }}
+  test: ${{ values.testPlane }}
+
+# CIT handoff webhook (FR-26/27): fired on publish with the release artifact's
+# metadata + build report + error-budget flag. Destination is per-service.
+webhook:
+  cit_handoff:
+    enabled: false          # flip on when a CIT sink exists (workflow step lands separately)
+    url: ""
+    auth_secret: ""         # name of a repo secret holding the shared secret (FR-26 open Q)
+
+checks:
+  lint:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
+  sast:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
+  pii-scan:          { enabled: true, mode: required, tier: fast, plane: build, applies: [any] }
+  private-key-check: { enabled: true, mode: required, tier: fast, plane: build, applies: [any] }
+  format:            { enabled: true, mode: advisory, tier: fast, plane: build, applies: [any] }
+  build:             { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
+  test:              { enabled: true, mode: blocking, tier: fast, plane: test,  applies: [any] }
+  # Target-state checks — enable once the TrueNorth-owned module implements them:
+  coverage:          { enabled: false, mode: advisory, tier: fast, plane: build, applies: [any] }
+  sbom:              { enabled: false, mode: advisory, tier: fast, plane: build, applies: [any] }
