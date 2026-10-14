@@ -96,6 +96,15 @@ spec:
       action: fetch:template
       input:
         url: ./skeleton
+        copyWithoutTemplating:
+          # The pipeline is fully generic (runtime config = truenorth.yaml) and
+          # full of GitHub Actions ${{ }} expressions (incl. labels.*.name and
+          # toJSON(...)) that the template engine cannot parse — copy verbatim.
+          # (This Backstage build honors copyWithoutTemplating; copyWithoutRender
+          # is a no-op in the fetch handler.)
+          - .github/workflows/**
+          - .github/truenorth_report.py
+          - tests/**
         values:
           componentId: ${{ parameters.componentId }}
           description: ${{ parameters.description }}
