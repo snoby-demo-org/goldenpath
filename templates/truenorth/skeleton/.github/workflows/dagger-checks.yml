@@ -70,6 +70,7 @@ jobs:
       module: ${{ steps.cfg.outputs.module }}
       registry: ${{ steps.cfg.outputs.registry }}
       deep_scan: ${{ steps.cfg.outputs.deep_scan }}
+      selected_map: ${{ steps.cfg.outputs.selected_map }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -171,6 +172,16 @@ jobs:
           print("build producer :", build_enabled)
           print("deep scan      :", deep)
           print("module         :", cfg.get("pipeline", {}).get("module"))
+
+          # Run-level start event, instrumented at the source (real-time).
+          sys.path.insert(0, os.path.join(os.environ.get("GITHUB_WORKSPACE", "."), ".github"))
+          import truenorth_report as tnr
+          tnr.emit_event("tn.run.start", "info", job_name="config",
+                         scan_checks=scan_checks, test_checks=test_checks,
+                         build_enabled=build_enabled, deep_scan=deep,
+                         module=cfg.get("pipeline", {}).get("module", ""))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"selected_map={json.dumps({k: ('build' if k == 'build' else ('test-checks' if c.get('plane') == 'test' else 'build-checks')) for k, c in selected.items()})}\n")
           EOF
 
   # Pipeline unit tests (no dagger, no registry): lock the enforcement model —
@@ -223,6 +234,7 @@ jobs:
           OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/${{ matrix.check }},github.actions.commit=${{ github.sha }}"
           TN_CHECK: ${{ matrix.check }}
           TN_JOB_NAME: build/${{ matrix.check }}
+          TN_GH_JOB: build-checks (${{ matrix.check }})
           TN_MODULE: ${{ needs.config.outputs.module }}
         run: |
           python3 - <<'HARNESS'
@@ -238,7 +250,12 @@ jobs:
           c = (yaml.safe_load(open(".github/truenorth.yaml")).get("checks", {}) or {}).get(check, {})
           mode = c.get("mode", "blocking")
           tier = c.get("tier", "fast")
+          # per-check module override (FR-19 per-language modules)
+          module = c.get("module") or module
 
+          tn.emit_event("tn.check.start", "info", check=check,
+                        job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, module=module)
           cmd = ["dagger", "call", "--mod", module, check, "--source=."]
           t0 = time.monotonic()
           proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -271,6 +288,9 @@ jobs:
           tn.write_result(result, out)
 
           print("TRUENORTH_CHECK_RESULT " + json.dumps(result, separators=(",", ":")), flush=True)
+          tn.emit_event("tn.check.done", "error" if result["status"] == "fail" else "info",
+                        check=check, job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, status=result["status"], duration_ms=dur)
 
           # Advisory findings never block (FR-59/60): record and exit green.
           if mode == "advisory" and proc.returncode != 0:
@@ -308,6 +328,7 @@ jobs:
           OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/build,github.actions.commit=${{ github.sha }}"
           TN_CHECK: build
           TN_JOB_NAME: build/build
+          TN_GH_JOB: build
           TN_MODULE: ${{ needs.config.outputs.module }}
           TN_REGISTRY: ${{ needs.config.outputs.registry }}
         run: |
@@ -325,7 +346,14 @@ jobs:
           check = os.environ["TN_CHECK"]
           module = os.environ["TN_MODULE"]
           c = (yaml.safe_load(open(".github/truenorth.yaml")).get("checks", {}) or {}).get(check, {})
+          mode = c.get("mode", "blocking")
+          tier = c.get("tier", "fast")
+          # per-check module override (FR-19 per-language modules)
+          module = c.get("module") or module
 
+          tn.emit_event("tn.check.start", "info", check=check,
+                        job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, module=module)
           cmd = ["dagger", "call", "--mod", module, check, "--source=."]
           t0 = time.monotonic()
           proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -374,6 +402,10 @@ jobs:
 
           print("produced digest:", digest)
           print("TRUENORTH_CHECK_RESULT " + json.dumps(result, separators=(",", ":")), flush=True)
+          tn.emit_event("tn.check.done", "error" if result["status"] == "fail" else "info",
+                        check=check, job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, status=result["status"], duration_ms=dur,
+                        digest=details.get("digest"))
           sys.exit(tn.harness_exit_code(c.get("mode", "blocking"), proc.returncode))
           HARNESS
 
@@ -383,6 +415,7 @@ jobs:
         with:
           name: image-digest
           path: digest.txt
+          if-no-files-found: warn   # compile-only builds (no image) produce no digest
 
       - name: Upload check result artifact
         if: always()
@@ -426,6 +459,7 @@ jobs:
           OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=test/${{ matrix.check }},github.actions.commit=${{ github.sha }}"
           TN_CHECK: ${{ matrix.check }}
           TN_JOB_NAME: test/${{ matrix.check }}
+          TN_GH_JOB: test-checks (${{ matrix.check }})
           TN_MODULE: ${{ needs.config.outputs.module }}
         run: |
           python3 - <<'HARNESS'
@@ -441,7 +475,12 @@ jobs:
           c = (yaml.safe_load(open(".github/truenorth.yaml")).get("checks", {}) or {}).get(check, {})
           mode = c.get("mode", "blocking")
           tier = c.get("tier", "fast")
+          # per-check module override (FR-19 per-language modules)
+          module = c.get("module") or module
 
+          tn.emit_event("tn.check.start", "info", check=check,
+                        job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, module=module)
           cmd = ["dagger", "call", "--mod", module, check, "--source=."]
           t0 = time.monotonic()
           proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -472,6 +511,9 @@ jobs:
           tn.write_result(result, out)
 
           print("TRUENORTH_CHECK_RESULT " + json.dumps(result, separators=(",", ":")), flush=True)
+          tn.emit_event("tn.check.done", "error" if result["status"] == "fail" else "info",
+                        check=check, job_name=os.environ.get("TN_GH_JOB", ""),
+                        mode=mode, tier=tier, status=result["status"], duration_ms=dur)
 
           if mode == "advisory" and proc.returncode != 0:
               print(f"::warning::advisory check '{check}' failed — recorded as flag in the build report, does not block")
@@ -521,6 +563,12 @@ jobs:
         env:
           TN_REGISTRY: ${{ needs.config.outputs.registry }}
           TN_UNIT_RESULT: ${{ needs.unit-tests.result }}
+          # Job outcomes are ground truth for legs that died before their
+          # harness could report a structured result (crash, runner loss).
+          TN_SELECTED_CHECKS: ${{ needs.config.outputs.selected_map }}
+          TN_BUILD_RESULT: ${{ needs.build.result }}
+          TN_BUILDCHECKS_RESULT: ${{ needs.build-checks.result }}
+          TN_TESTCHECKS_RESULT: ${{ needs.test-checks.result }}
         run: python3 .github/truenorth_report.py
 
       - name: Upload build report

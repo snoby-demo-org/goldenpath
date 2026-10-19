@@ -23,10 +23,53 @@ import glob
 import json
 import os
 import sys
+import time
+import urllib.request
 
 MODES = ("required", "blocking", "advisory")
 BUDGET_ZERO = {"advisory_findings": 0, "out_of_policy_exceptions": 0,
                "disabled_required": 0, "total": 0}
+
+# ---------------------------------------------------------------------------
+# Source-instrumented telemetry (tn.* events): push structured events straight
+# to Loki's native push endpoint the moment they happen — real-time (no
+# 5-min scraper lag), label-clean (no regex classification of console blobs).
+# The OTLP path (collector -> Loki) already carries dagger's own spans/logs;
+# these tn.* events are the pipeline's OWN log points (run/check lifecycle):
+#   tn.run.start    — config job, after truenorth.yaml is parsed
+#   tn.check.start  — check-leg harness, right before the dagger call
+#   tn.check.done   — check-leg harness, right where TRUENORTH_CHECK_RESULT lands
+#   tn.run.done     — build-report CLI, right where TRUENORTH_BUILD_REPORT lands
+# Streams sit under service_name="truenorth" so dashboards target the
+# instrumented layer: {service_name="truenorth", tn_event="tn.run.done"}.
+# Telemetry must NEVER fail the pipeline: every error becomes a ::warning::.
+TN_LOKI_URL = os.environ.get("TN_LOKI_URL", "http://10.0.0.62:3100/loki/api/v1/push")
+
+
+def emit_event(event, level="info", check="", job_name="", **payload):
+    stream = {
+        "service_name": "truenorth",
+        "tn_event": event,
+        "level": level,
+        "repo": os.environ.get("GITHUB_REPOSITORY", ""),
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "commit": os.environ.get("GITHUB_SHA", ""),
+        "run_name": os.environ.get("GITHUB_WORKFLOW", ""),
+        "job_name": job_name,
+        "check": check,
+    }
+    body = json.dumps({"event": event, **payload}, separators=(",", ":"))[:4096]
+    try:
+        req = urllib.request.Request(
+            TN_LOKI_URL,
+            data=json.dumps({"streams": [{"stream": stream,
+                                          "values": [[str(time.time_ns()), body]]}]}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            if r.status // 100 != 2:
+                raise RuntimeError(f"Loki push -> {r.status}")
+    except Exception as exc:  # telemetry must never fail the pipeline
+        print(f"::warning::tn_emit {event} failed: {exc}", file=sys.stderr)
 
 
 def harness_exit_code(mode, returncode):
@@ -179,6 +222,29 @@ def main():
                                  "reason": f"pipeline unit tests {unit} — enforcement model unverified"})
         report["conclusion"] = conclusion_of(report["blocks"], report["flags"])
 
+    # A selected check whose workflow job ended WITHOUT a structured result
+    # (harness crashed before reporting — e.g. NameError, runner loss) can
+    # never mint a green report: the job outcome is ground truth there. A leg
+    # that failed WITH a result is already handled by its own block/flag.
+    JOB_RESULT_ENV = {"build": "TN_BUILD_RESULT",
+                      "build-checks": "TN_BUILDCHECKS_RESULT",
+                      "test-checks": "TN_TESTCHECKS_RESULT"}
+    try:
+        selected_map = json.loads(os.environ.get("TN_SELECTED_CHECKS", "{}"))
+    except json.JSONDecodeError:
+        selected_map = {}
+    for name, job in selected_map.items():
+        if name in results:
+            continue
+        outcome = os.environ.get(JOB_RESULT_ENV.get(job, ""), "")
+        if outcome and outcome not in ("success", "skipped"):
+            report["blocks"].append({
+                "check": "pipeline", "type": f"{job}_leg_no_result",
+                "reason": f"check '{name}' was selected but its {job} job ended {outcome} "
+                          f"without a structured result — a leg that dies before reporting "
+                          f"cannot prove itself clean"})
+            report["conclusion"] = conclusion_of(report["blocks"], report["flags"])
+
     blocks, flags, clean = report["blocks"], report["flags"], report["clean"]
     budget = report["error_budget"]
     conclusion = report["conclusion"]
@@ -220,6 +286,15 @@ def main():
     # field in LogQL group-bys — so the run conclusion gets its own name.
     rline["tn_conclusion"] = conclusion
     print("TRUENORTH_BUILD_REPORT " + json.dumps(rline, separators=(",", ":")), flush=True)
+
+    # Run-level "done" — the definitive end-of-run event, instrumented at the
+    # source (real-time). Level=error when blocked so dashboards color it red.
+    emit_event("tn.run.done", "error" if blocks else "info",
+               job_name="build-report",
+               conclusion=conclusion, budget_total=budget["total"],
+               blocks=[b["check"] for b in blocks],
+               flags=[fl["check"] for fl in flags],
+               checks_pass=[c["check"] for c in clean])
 
     # Run summary table (visible on the run page)
     with open(os.environ["GITHUB_STEP_SUMMARY"], "w") as f:
