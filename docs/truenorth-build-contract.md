@@ -123,27 +123,33 @@ separate pipeline. The enforcement model is unchanged — `build` is blocking
 and fails if *any* variant fails; the build report aggregates per variant.
 
 ```yaml
-build:
-  enabled: true
-  mode: blocking
-  module: github.com/snoby-demo-org/dagger-checks-c@v1.1.0
-  hooks:                       # shared defaults; a variant may override any slot
-    patch:     patches/*.patch
-    configure: autogen.sh
-    build:     build.sh
-  matrix:
-    - id: amd-znver2
-      env: { MARCH: znver2 }
-    - id: intel-x86-64v2
-      env: { MARCH: x86-64-v2 }
+checks:
+  build:
+    enabled: true
+    mode: blocking
+    module: github.com/snoby-demo-org/dagger-checks-c@v1.1.2
+    hooks:                     # shared by ALL variants; a variant may override any slot
+      autogen:   ./autogen.sh
+      configure: export CFLAGS="-O3 -march=${MARCH} -pthread" ; ./configure --with-curl
+      make:      make clean && make -j"$(nproc)"
+    matrix:
+      - id: amd-znver2
+        env: { MARCH: znver2 }
+      - id: intel-x86-64v2
+        env: { MARCH: x86-64-v2 }
 ```
 
 - No `matrix:` → a single implicit variant (exactly today's behavior).
-- Variants fan out to parallel runner pods, one job per variant
-  (`build (amd-znver2)`); each emits `TRUENORTH_RESULT` with a `variant:`
-  field added to the payload.
-- Env vars are exported before the hook chain runs, so `build.sh` reads
-  `$MARCH` and stays variant-unaware otherwise.
+- **The patch stage is not a matrix dimension**: `patches/*.patch` applies
+  (glob order, `patch -p1`) identically before the hook chain of **every**
+  variant. Variant-specific patching is not supported yet (a `patch:` hook
+  key / per-variant patch globs are candidates for the matrix machinery).
+- Variants fan out per the mechanism chosen (module loop or workflow
+  fan-out); each emits `TRUENORTH_RESULT` with a `variant:` field added to
+  the payload, and runs the full declared chain
+  `patch → autogen → configure → make`.
+- Env vars are exported before the hook chain runs, so the hook lines read
+  `$MARCH` and stay variant-unaware otherwise.
 - `truenorth-exceptions.yaml` can target a single variant
   (`check: build`, `variant: intel-x86-64v2`).
 - Digest handoff: image-producing variants push `:sha-<variant>`; test-plane
