@@ -73,7 +73,7 @@ spec:
           title: Dagger checks module
           type: string
           description: Shared Dagger module the pipeline dispatches to
-          default: github.com/snoby-demo-org/dagger-checks
+          default: github.com/snoby-demo-org/dagger-checks@v1.0.5
         registry:
           title: Image registry
           type: string

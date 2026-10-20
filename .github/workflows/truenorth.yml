@@ -278,6 +278,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # depth 2: the manifest step diffs HEAD~1..HEAD
+          fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
         uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
@@ -288,6 +291,17 @@ jobs:
           github_token: ${{ github.token }}
           self_monitoring: false
           secrets_to_redact: '{"github_token": "${{ github.token }}"}'
+
+      - name: Changed-file manifest (incremental scans)
+        run: |
+          # Scope hint for checks that support it (pii-scan v1.0.5+): files
+          # touched by HEAD~1..HEAD. No history (first run) or deep-scan ->
+          # no manifest -> checks fall back to FULL scan on their own.
+          # Modules that don't read the manifest simply ignore it.
+          if [ "${{ needs.config.outputs.deep_scan }}" != "true" ] && git rev-parse -q --verify 'HEAD~1' >/dev/null 2>&1; then
+            git diff --name-only 'HEAD~1..HEAD' > truenorth-changed-files.txt || true
+          fi
+          echo "manifest: $(wc -l < truenorth-changed-files.txt 2>/dev/null || echo 0) changed file(s) (deep_scan=${{ needs.config.outputs.deep_scan }})"
 
       - name: Run check [${{ matrix.check }}]
         env:
