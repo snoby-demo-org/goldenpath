@@ -26,6 +26,34 @@ TrueNorth enforcement pipeline: config-driven checks where
   (`goldenpath-builds` dashboard) renders checks, traces, and the flow from
   that telemetry
 
+## Controlling the build (hooks)
+
+Two ways to control the build check:
+
+**Declared hooks (preferred)** — explicit command lines under the `build:`
+check in `.github/truenorth.yaml`; **only what you declare runs**:
+
+```yaml
+build:
+  hooks:
+    autogen:   ./autogen.sh
+    configure: ./configure --with-curl
+    make:      make clean && make -j"$(nproc)"
+```
+
+Single-line commands (`bash -c` in the repo root; set CFLAGS/CC inside the
+command). `build.sh` and generic stages are ignored while hooks are declared.
+
+**Presence-detected files (legacy)** — drop files in the repo root, no
+config: `patches/*.patch` (applied with `patch -p1`, glob order),
+`autogen.sh` (prep stage), `build.sh` (replaces the generic `./configure`
+step; generic `make` still runs afterward in legacy mode).
+
+The check fails on a failed stage or a missing output binary, reporting the
+failing stage in `TRUENORTH_RESULT`. Multiple build targets (matrix, e.g.
+per-CPU-arch) are **contract only — machinery pending, not yet functional**.
+Full contract: goldenpath TechDocs, *"TrueNorth build contract"*.
+
 ## Adding a check
 
 1. Implement a function with the check's name in the shared Dagger module

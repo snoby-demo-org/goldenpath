@@ -38,6 +38,30 @@ webhook:
     url: ""
     auth_secret: ""         # name of a repo secret holding the shared secret (FR-26 open Q)
 
+# ---------------------------------------------------------------------------
+# Build leg control (when the build check uses the C/C++ module,
+# dagger-checks-c). Two ways to control the build:
+#
+# 1. DECLARED HOOKS (preferred — shipped dagger-checks-c@v1.1.1): explicit
+#    command lines under this build check; ONLY what you declare runs:
+#      hooks:
+#        autogen:   ./autogen.sh
+#        configure: ./configure --with-curl
+#        make:      make clean && make -j"$(nproc)"
+#    Single-line commands, run via bash -c in the repo root (set CFLAGS/CC
+#    inside the command). build.sh and generic stages are ignored while
+#    hooks are declared. Build variants (matrix, e.g. -march per CPU target)
+#    are CONTRACT ONLY — machinery pending, not yet functional.
+#
+# 2. PRESENCE-DETECTED FILES (legacy, no config): patches/*.patch applied
+#    with `patch -p1` in glob order; autogen.sh pre-stage if present;
+#    build.sh if present REPLACES the generic ./configure stage (generic
+#    `make -j"$(nproc)"` still runs after it in legacy mode).
+#
+# The check fails on any failed stage or when no cpuminer*/minerd* ELF binary
+# is produced; failures are reported via TRUENORTH_RESULT failed_stage.
+# Full contract: goldenpath TechDocs, "TrueNorth build contract".
+# ---------------------------------------------------------------------------
 checks:
   lint:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
   sast:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
