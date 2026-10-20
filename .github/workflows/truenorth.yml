@@ -8,7 +8,9 @@ name: Dagger Checks
 #     one parallel ARC runner pod, own process / own engine session. Source
 #     scans launch immediately in parallel — no dependency on the image build.
 #   build (digest producer): pushes the image to the registry and captures its
-#     digest — the handoff contract to the test plane.
+#     digest — the handoff contract to the test plane. MATRIX (v2.1): config
+#     fans checks.build.matrix out to one parallel pod per variant id; the
+#     check fails if ANY variant pod fails (needs.build.result aggregate).
 #   test-checks (matrix): every enabled test-plane check = one parallel ARC
 #     runner pod, gated on the build producing a digest.
 #   build-report: consumes every check's structured result and produces the
@@ -54,7 +56,7 @@ env:
 # REUSABLE — single machinery copy (Option B). Callers run:
 #   jobs:
 #     truenorth:
-#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2
+#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
 #       with:  { deep_scan: ${{ github.event.inputs.deep_scan == 'true' }} }
 #       secrets: inherit
 # Release procedure: bump EVERY internal truenorth-vN ref in this file to the
@@ -75,6 +77,7 @@ jobs:
     outputs:
       scan_checks: ${{ steps.cfg.outputs.scan_checks }}
       test_checks: ${{ steps.cfg.outputs.test_checks }}
+      build_variants: ${{ steps.cfg.outputs.build_variants }}
       planes: ${{ steps.cfg.outputs.planes }}
       build_enabled: ${{ steps.cfg.outputs.build_enabled }}
       module: ${{ steps.cfg.outputs.module }}
@@ -86,7 +89,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
 
       # Live per-job spans, exported during the run (outbound to in-cluster collector)
       - name: OpenTelemetry job instrumentation
@@ -205,9 +208,33 @@ jobs:
               test_checks = [k for k, c in selected.items() if c.get("plane") == "test"]
               build_enabled = "build" in selected
 
+              # Build matrix (truenorth-v2.1): checks.build.matrix is a mapping
+              # {<variant-id>: {env: {...}, hooks: {...}}}. Each id fans out to
+              # its own parallel `build` runner pod (workflow-level fan-out —
+              # one pod per variant). No matrix: block = single implicit
+              # variant "default" (identical to pre-matrix behavior).
+              build_variants = ["default"]
+              if build_enabled:
+                  m = checks.get("build", {}).get("matrix")
+                  if m is not None and m != {}:
+                      if not isinstance(m, dict):
+                          print("::error::truenorth.yaml invalid: checks.build.matrix must be a mapping {<variant-id>: {env, hooks}}")
+                          emit_stage("config", "fail", 1)
+                          sys.exit(1)
+                      bad = [vid for vid, e in m.items() if not isinstance(e, dict)]
+                      if bad:
+                          print(f"::error::truenorth.yaml invalid: matrix entries must be mappings: {bad}")
+                          emit_stage("config", "fail", 1)
+                          sys.exit(1)
+                      build_variants = sorted(m.keys())
+                      if len(build_variants) > 1 and cfg.get("pipeline", {}).get("registry"):
+                          print("::warning::build matrix has multiple variants and a registry is set — per-variant image digest handoff to the test plane is NOT implemented yet (FR-18/19 digest-set); test-plane checks will consume an arbitrary variant's digest")
+                      print("build variants  :", build_variants)
+
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write(f"scan_checks={json.dumps(scan_checks)}\n")
                   f.write(f"test_checks={json.dumps(test_checks)}\n")
+                  f.write(f"build_variants={json.dumps(build_variants)}\n")
                   f.write(f"planes={json.dumps(planes)}\n")
                   f.write(f"build_enabled={str(build_enabled).lower()}\n")
                   f.write(f"module={cfg.get('pipeline', {}).get('module', '')}\n")
@@ -252,7 +279,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: snoby-demo-org/goldenpath
-          ref: truenorth-v2
+          ref: truenorth-v2.1
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -283,7 +310,7 @@ jobs:
           fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -384,16 +411,24 @@ jobs:
   # Digest producer: builds the real image, pushes to the registry, captures
   # the real digest as the handoff artifact the test plane consumes. Launches
   # in parallel with the build-checks scan fan-out (no `needs: build-checks`).
+  # MATRIX (truenorth-v2.1): config fans checks.build.matrix out to one
+  # parallel pod per variant id (build (amd-znver2), ...); each pod calls the
+  # module with --variant=<id>. No matrix: block = single "default" variant
+  # (job renders as `build (default)`; telemetry keeps the legacy job name).
   build:
     needs: config
     if: needs.config.outputs.build_enabled == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.config.outputs.build_variants) }}
     runs-on: ${{ fromJSON(needs.config.outputs.planes).build }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -404,10 +439,13 @@ jobs:
 
       - name: Build image and capture digest
         env:
-          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/build,github.actions.commit=${{ github.sha }}"
+          OTEL_RESOURCE_ATTRIBUTES: "github.actions.workflow_run.id=${{ github.run_id }},github.actions.job.name=build/${{ matrix.variant == 'default' && 'build' || matrix.variant }},github.actions.commit=${{ github.sha }}"
           TN_CHECK: build
-          TN_JOB_NAME: build/build
-          TN_GH_JOB: build
+          TN_VARIANT: ${{ matrix.variant }}
+          # default variant keeps the legacy job name ("build") so existing
+          # dashboards/log queries are unaffected by the matrix machinery
+          TN_JOB_NAME: build/${{ matrix.variant == 'default' && 'build' || matrix.variant }}
+          TN_GH_JOB: ${{ matrix.variant == 'default' && 'build' || format('build ({0})', matrix.variant) }}
           TN_MODULE: ${{ needs.config.outputs.module }}
           TN_REGISTRY: ${{ needs.config.outputs.registry }}
         run: |
@@ -424,6 +462,7 @@ jobs:
 
           check = os.environ["TN_CHECK"]
           module = os.environ["TN_MODULE"]
+          variant = os.environ.get("TN_VARIANT", "default")
           c = (yaml.safe_load(open(".github/truenorth.yaml")).get("checks", {}) or {}).get(check, {})
           mode = c.get("mode", "blocking")
           tier = c.get("tier", "fast")
@@ -432,8 +471,10 @@ jobs:
 
           tn.emit_event("tn.check.start", "info", check=check,
                         job_name=os.environ.get("TN_GH_JOB", ""),
-                        mode=mode, tier=tier, module=module)
+                        mode=mode, tier=tier, module=module, variant=variant)
           cmd = ["dagger", "call", "--mod", module, check, "--source=."]
+          if variant and variant != "default":
+              cmd += ["--variant", variant]
           t0 = time.monotonic()
           proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace")
@@ -473,7 +514,8 @@ jobs:
                                    run_id=int(os.environ["GITHUB_RUN_ID"]),
                                    commit=os.environ["GITHUB_SHA"],
                                    job=os.environ.get("TN_JOB_NAME", f"build/{check}"),
-                                   score=score, findings=findings, details=details)
+                                   score=score, findings=findings, details=details,
+                                   variant=None if variant == "default" else variant)
           tn.write_result(result, out)
           if digest:
               with open("digest.txt", "w") as f:
@@ -484,7 +526,7 @@ jobs:
           tn.emit_event("tn.check.done", "error" if result["status"] == "fail" else "info",
                         check=check, job_name=os.environ.get("TN_GH_JOB", ""),
                         mode=mode, tier=tier, status=result["status"], duration_ms=dur,
-                        digest=details.get("digest"))
+                        digest=details.get("digest"), variant=variant)
           sys.exit(tn.harness_exit_code(c.get("mode", "blocking"), proc.returncode))
           HARNESS
 
@@ -492,7 +534,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: image-digest
+          name: image-digest-${{ matrix.variant }}
           path: digest.txt
           if-no-files-found: warn   # compile-only builds (no image) produce no digest
 
@@ -500,7 +542,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: check-result-build
+          name: check-result-build-${{ matrix.variant }}
           path: results/
 
   # Every test-plane check = one parallel ARC runner pod, gated on the build
@@ -519,7 +561,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -531,7 +573,8 @@ jobs:
       - name: Download digest handoff
         uses: actions/download-artifact@v4
         with:
-          name: image-digest
+          pattern: image-digest-*
+          merge-multiple: true
 
       - name: Resolve image from registry
         run: echo "test plane pulls $(cat digest.txt 2>/dev/null || echo 'no digest') from ${{ needs.config.outputs.registry }}"
@@ -627,7 +670,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
