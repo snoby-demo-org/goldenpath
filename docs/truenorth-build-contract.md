@@ -41,9 +41,13 @@ Rules:
   make-ready; see [Known wart and follow-up](#known-wart-and-follow-up).)
 - Quirk: an `autogen.sh` failure inside the `build.sh` path reports
   `failed_stage: "build.sh"` (the stage is selected before the pre-stage
-  runs).
+  runs), and `no_binary` reports `failed_stage: "make"` (the binary check
+  runs after the make stage).
 - The check **fails** on any stage failure or when no ELF binary is
-  produced. The failing stage's last 60 log lines are surfaced in the error.
+  produced. The failing stage's last 60 log lines are surfaced in the error;
+  log-tail selection is by failed stage name (`make`/`build.sh` →
+  `make.log`, `configure` → `configure.log`, anything else → the console
+  log, which also serves as fallback when the stage log does not exist).
 - Compiler warnings are counted and reported; they do **not** fail the check.
 
 ### Result contract (FR-7)
