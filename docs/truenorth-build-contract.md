@@ -16,9 +16,11 @@ ccache). The actual stage flow is:
 patch → configure-or-build.sh → make
 ```
 
-`make -j"$(nproc)"` **always runs last, in both paths**. Each stage has a
-hook slot. **Hooks are files in the repo root** — drop them in and the
-pipeline uses them; no config required.
+`make -j"$(nproc)"` **always runs last, in both legacy paths**. (Exception:
+declared-hook mode — [below](#declared-hooks-shipped--dagger-checks-cv111) —
+runs *only* what you declare.) Each stage has a hook slot. **Hooks are files
+in the repo root** — drop them in and the pipeline uses them; no config
+required.
 
 ### Stage flow and hook slots
 
@@ -70,29 +72,45 @@ failure the module raises with the failing stage's log tail instead:
   `maxdepth 2` whose first 4 bytes are ELF magic `7f454c46`; no match →
   failure with `no_binary`.
 
-### Declared hooks (contract — machinery pending)
+### Declared hooks (shipped — `dagger-checks-c@v1.1.1`)
 
-Presence detection stays the default, but hooks may be declared explicitly.
-Explicit beats magic, and **a declared hook that does not exist must fail
-fast at config parse** — not 20 minutes into `make`:
+Declare explicit command lines in your own `.github/truenorth.yaml`. The
+module **self-reads** the `build:` block from the mounted source — no
+workflow change, no pipeline machinery change:
 
 ```yaml
-build:
-  enabled: true
-  mode: blocking
-  module: github.com/snoby-demo-org/dagger-checks-c@v1.1.0
-  hooks:
-    patch:     patches/*.patch   # glob, applied with patch -p1
-    configure: autogen.sh        # prep / regeneration stage
-    build:     build.sh          # replaces ./configure; make still runs
+checks:
+  build:
+    enabled: true
+    mode: blocking
+    module: github.com/snoby-demo-org/dagger-checks-c@v1.1.1
+    hooks:
+      autogen:   ./autogen.sh
+      configure: ./configure --with-curl
+      make:      make clean && make -j"$(nproc)"
 ```
 
-- Hook names are **stage names, not tool names** (`patch` / `configure` /
-  `build`, never `autogen`). A future cmake/meson module maps the same three
-  stages to its own toolchain and the config reads identically.
-- Hooks are the fine-grained escape hatch; the coarse-grained one is the
-  `module:` override (swap the whole language module). Reach for `module:`
-  only when you need different machinery entirely.
+Semantics (declared mode):
+
+- **Only the declared stages run**, in `autogen → configure → make` order.
+  `build.sh` and the generic stages are **ignored**; anything left
+  undeclared is skipped (forgetting `make` surfaces as `no_binary`).
+- Values are **single-line shell commands** run via `bash -c` in `/src` —
+  set your own environment in the command (e.g. the cpuminer configure hook
+  exports `CFLAGS="-O3 -march=znver2 …"` and
+  `LDFLAGS="-static-libstdc++ -static-libgcc"`). No inline comments on hook
+  lines; a fully-quoted value (`"…"`) gets its outer quotes stripped.
+- Failures report the usual statuses (`autogen_failed`, `configure_failed`,
+  `make_failed`) with `failed_stage` = the stage name.
+- Works whether `build:` is nested under `checks:` (the template shape) or
+  top-level — both parse.
+- The `module:` override remains the coarse-grained escape hatch (swap the
+  whole language module).
+- The patch stage is unchanged: `patches/*.patch` still applies first.
+
+The legacy presence path (files in the repo root, below) still applies
+unchanged when no `hooks:` are declared — existing repos see zero behavior
+change.
 
 ## Matrix builds (contract — machinery pending)
 
@@ -151,21 +169,22 @@ target, libc variant, or flag set never warrants a second pipeline.
 
 ## Known wart and follow-up
 
-The `make` stage runs unconditionally after `build.sh` — so a build script
-that fully builds the project (cpuminer-opt-cpupower's does: configure + make
-+ packaging) triggers a second, usually no-op `make`. Harmless there, but a
-`build.sh` that leaves the tree unmakeable (e.g. it distcleans or the default
-target does not exist) would turn a successful build into a false
-`make_failed`. Proposed fix (behavior change → `dagger-checks-c` v1.1.1):
-when `build.sh` exists, skip the generic make stage — true takeover semantics
-matching this document's intent. Pending a decision; until then this page
-describes the code as it is.
+The `make` stage runs unconditionally after `build.sh` in the legacy path —
+so a build script that fully builds the project (cpuminer-opt-cpupower's
+does: configure + make + packaging) triggers a second, usually no-op `make`.
+Harmless there, but a `build.sh` that leaves the tree unmakeable (e.g. it
+distcleans or the default target does not exist) would turn a successful
+build into a false `make_failed`. **Repos using declared hooks are immune** —
+declared mode runs only the declared stages, never a generic make. For
+legacy `build.sh` repos, skipping the generic make (true takeover) remains a
+proposed behavior change, pending a decision; until then this page describes
+the legacy path as it is.
 
 ## Status
 
 | Piece | Status |
 |---|---|
-| Hook slots (presence detection) | **Shipped** — `dagger-checks-c@v1.1.0` |
-| Declared hooks (`hooks:` in truenorth.yaml) | Contract documented; machinery pending |
+| Hook slots (presence detection) | **Shipped** — `dagger-checks-c@v1.1.0`, unchanged in v1.1.1 |
+| Declared hooks (`build.hooks` in truenorth.yaml) | **Shipped** — `dagger-checks-c@v1.1.1` (module self-reads; declared mode runs only declared stages) |
 | Matrix (`matrix:` fan-out, per-variant results/report/digests) | Contract documented; machinery pending (module env passthrough, reusable-workflow fan-out, report aggregation by variant, digest-set handoff) |
-| `build.sh` → skip generic make (true takeover) | Proposed v1.1.1; pending decision |
+| `build.sh` → skip generic make (true takeover, legacy path) | Moot for declared-hook repos; legacy path pending decision |
