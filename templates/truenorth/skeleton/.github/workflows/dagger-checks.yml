@@ -93,11 +93,35 @@ jobs:
           python3 - <<'EOF'
           import json, os, re, sys
           import yaml
+          import time as _t
+
+          _t0 = _t.time()
+
+          def emit_stage(check, status, exit_code=0):
+              # Stage result line (same contract as tn.build_result) so the
+              # dashboard flow DAG can color EVERY stage pass/fail, not just
+              # the check matrix. Telemetry only — enforcement is unaffected.
+              print("TRUENORTH_CHECK_RESULT " + json.dumps({
+                  "check": check, "status": status, "mode": "blocking", "tier": "fast",
+                  "score": None, "findings": None,
+                  "duration_ms": int((_t.time() - _t0) * 1000), "exit_code": exit_code,
+                  "commit": os.environ["GITHUB_SHA"], "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "job": "config", "details": {},
+              }, separators=(",", ":")), flush=True)
+
+          # `push` = the run started. The trigger has no in-run failure mode:
+          # if this job is executing, the push fired and won.
+          emit_stage("push", "pass")
 
           try:
               cfg = yaml.safe_load(open(".github/truenorth.yaml"))
           except FileNotFoundError:
               print("::error::.github/truenorth.yaml not found — it is the only file a repo owns to drive CI (FR-58).")
+              emit_stage("config", "fail", 1)
+              sys.exit(1)
+          except yaml.YAMLError as e:
+              print(f"::error::truenorth.yaml invalid YAML: {e}")
+              emit_stage("config", "fail", 1)
               sys.exit(1)
 
           checks = cfg.get("checks", {})
@@ -115,6 +139,7 @@ jobs:
           if errors:
               for e in errors:
                   print(f"::error::truenorth.yaml invalid: {e}")
+              emit_stage("config", "fail", 1)
               sys.exit(1)
 
           # --- deep-scan trigger detection (FR-16) ----------------------------
@@ -151,6 +176,9 @@ jobs:
                   "commit": os.environ["GITHUB_SHA"],
               }
               print("TRUENORTH_CONFIG " + json.dumps(line, separators=(",", ":")))
+
+          # Config stage result: truenorth.yaml parsed, validated, model emitted.
+          emit_stage("config", "pass")
 
           # Every enabled build-plane check EXCEPT `build` becomes a parallel
           # scan pod. `build` is the digest producer (push + capture digest) —

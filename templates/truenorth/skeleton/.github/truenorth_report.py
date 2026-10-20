@@ -287,6 +287,17 @@ def main():
     rline["tn_conclusion"] = conclusion
     print("TRUENORTH_BUILD_REPORT " + json.dumps(rline, separators=(",", ":")), flush=True)
 
+    # Stage result for the `done` cell: the run's outcome as a standard
+    # check-result line so the flow DAG colors the final stage green/red
+    # (telemetry only — the report above remains the source of truth).
+    print("TRUENORTH_CHECK_RESULT " + json.dumps({
+        "check": "done", "status": "pass" if conclusion == "clean" else "fail",
+        "mode": "blocking", "tier": "fast", "score": None, "findings": None,
+        "duration_ms": None, "exit_code": 0 if conclusion == "clean" else 1,
+        "commit": rline.get("commit"), "run_id": rline.get("run_id"),
+        "job": "build-report", "details": {"tn_conclusion": conclusion},
+    }, separators=(",", ":")), flush=True)
+
     # Run-level "done" — the definitive end-of-run event, instrumented at the
     # source (real-time). Level=error when blocked so dashboards color it red.
     emit_event("tn.run.done", "error" if blocks else "info",
