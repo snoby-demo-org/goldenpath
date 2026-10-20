@@ -166,3 +166,49 @@ class PipelineTruth(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MatrixVariants(unittest.TestCase):
+    """Matrix fan-out (truenorth-v2.1): per-variant results of ONE check fold
+    into a single contract result — worst status wins, per-variant detail kept."""
+
+    def vr(self, variant, status, rc=0, dur=100):
+        r = tn.build_result("build", {"mode": "blocking"}, rc, dur, 1, "c",
+                            f"build/{variant}", variant=variant)
+        r["status"] = status
+        return r
+
+    def test_variant_field_present_only_when_set(self):
+        r = tn.build_result("build", {}, 0, 10, 1, "c", "build/build")
+        self.assertNotIn("variant", r)
+        r2 = tn.build_result("build", {}, 0, 10, 1, "c", "build/amd", variant="amd")
+        self.assertEqual(r2["variant"], "amd")
+
+    def test_all_variants_pass_merges_to_pass(self):
+        merged = tn.merge_variant_results([self.vr("amd-znver2", "pass"),
+                                           self.vr("intel-x86-64v2", "pass", dur=250)])
+        self.assertEqual(merged["status"], "pass")
+        self.assertEqual(merged["duration_ms"], 250)
+        self.assertEqual(merged["job"], "build/matrix")
+        self.assertEqual(set(merged["details"]["variants"]), {"amd-znver2", "intel-x86-64v2"})
+
+    def test_any_variant_failure_fails_the_check(self):
+        merged = tn.merge_variant_results([self.vr("amd-znver2", "pass"),
+                                           self.vr("intel-x86-64v2", "fail", rc=2)])
+        self.assertEqual(merged["status"], "fail")
+        self.assertEqual(merged["exit_code"], 2)
+        # and the merged failure BLOCKS like any other blocking failure
+        rep = tn.classify({"build": {"enabled": True, "mode": "blocking"}}, {"build": merged})
+        self.assertEqual(len(rep["blocks"]), 1)
+        self.assertEqual(rep["blocks"][0]["check"], "build")
+
+    def test_write_result_variant_filenames(self):
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as d:
+            tn.write_result(self.vr("amd-znver2", "pass"), "out", outdir=d)
+            self.assertTrue(os.path.exists(os.path.join(d, "build--amd-znver2.json")))
+            self.assertTrue(os.path.exists(os.path.join(d, "build--amd-znver2.stdout.log")))
+            plain = tn.build_result("build", {}, 0, 10, 1, "c", "build/build")
+            tn.write_result(plain, "out", outdir=d)
+            self.assertTrue(os.path.exists(os.path.join(d, "build.json")))
+            self.assertEqual(json.load(open(os.path.join(d, "build.json")))["check"], "build")

@@ -82,9 +82,11 @@ def harness_exit_code(mode, returncode):
 
 
 def build_result(check, cfg, returncode, duration_ms, run_id, commit, job,
-                 score=None, findings=None, details=None):
-    """Check contract (FR-7/FR-11): the structured result every check leg emits."""
-    return {
+                 score=None, findings=None, details=None, variant=None):
+    """Check contract (FR-7/FR-11): the structured result every check leg emits.
+    Matrix variants (truenorth-v2.1): variant=<id> adds a "variant" field
+    (None for the implicit single variant — payload unchanged there)."""
+    result = {
         "check": check,
         "status": "pass" if returncode == 0 else "fail",
         "mode": cfg.get("mode", "blocking"),
@@ -94,15 +96,50 @@ def build_result(check, cfg, returncode, duration_ms, run_id, commit, job,
         "commit": commit, "run_id": run_id, "job": job,
         "details": details if details is not None else {},
     }
+    if variant is not None:
+        result["variant"] = variant
+    return result
 
 
 def write_result(result, stdout_text, outdir="results"):
     os.makedirs(outdir, exist_ok=True)
     check = result["check"]
-    with open(os.path.join(outdir, f"{check}.json"), "w") as f:
+    variant = result.get("variant")
+    # per-variant results get their own file so matrix pods can't overwrite
+    # each other; the implicit single variant keeps the legacy name
+    stem = f"{check}--{variant}" if variant else check
+    with open(os.path.join(outdir, f"{stem}.json"), "w") as f:
         json.dump(result, f)
-    with open(os.path.join(outdir, f"{check}.stdout.log"), "w") as f:
+    with open(os.path.join(outdir, f"{stem}.stdout.log"), "w") as f:
         f.write(stdout_text)
+
+
+def merge_variant_results(results_list):
+    """Fold the per-variant results of ONE check (matrix fan-out) into a
+    single contract result: worst status wins; per-variant detail preserved
+    under details["variants"]. Pure function — unit-tested."""
+    base = dict(results_list[0])
+    variants = {}
+    worst = "pass"
+    # deterministic order (variant id) — glob/filesystem order must not leak
+    # into merged output (exit_code of the first failing variant)
+    ordered = sorted(results_list, key=lambda x: x.get("variant") or "")
+    for r in ordered:
+        vid = r.get("variant") or "default"
+        variants[vid] = {"status": r.get("status"), "exit_code": r.get("exit_code"),
+                         "duration_ms": r.get("duration_ms")}
+        if r.get("status") == "fail":
+            worst = "fail"
+    base["status"] = worst
+    base["exit_code"] = (next((r.get("exit_code") for r in ordered
+                               if r.get("status") == "fail"), 0)
+                         if worst == "fail" else 0)
+    base["duration_ms"] = max((r.get("duration_ms") or 0) for r in results_list)
+    base["job"] = f"{(base.get('job') or 'build').split('/')[0]}/matrix"
+    details = dict(base.get("details") or {})
+    details["variants"] = variants
+    base["details"] = details
+    return base
 
 
 def load_exceptions(path=".github/truenorth-exceptions.yaml"):
@@ -204,12 +241,18 @@ def main():
     exceptions = load_exceptions()
 
     results = {}
+    raw: dict[str, list] = {}
     for p in glob.glob("results/*.json"):
         try:
             r = json.load(open(p))
-            results[r["check"]] = r
+            raw.setdefault(r["check"], []).append(r)
         except (json.JSONDecodeError, KeyError):
             print(f"::warning::unparseable check result: {p}")
+    # Matrix fan-out (truenorth-v2.1): multiple per-variant results for one
+    # check fold into a single contract result (worst status wins); a lone
+    # result passes through untouched.
+    for name, rs in raw.items():
+        results[name] = rs[0] if len(rs) == 1 else merge_variant_results(rs)
 
     report = classify(checks_cfg, results, exceptions)
 

@@ -112,15 +112,18 @@ The legacy presence path (files in the repo root, below) still applies
 unchanged when no `hooks:` are declared — existing repos see zero behavior
 change.
 
-## Matrix builds (contract — machinery pending)
+## Matrix builds (SHIPPED — workflow fan-out, truenorth-v2.1)
 
-Nothing here is implemented yet: no module does variant fan-out and no
-`TRUENORTH_RESULT` payload carries a `variant` field today. This section
-documents the target contract. One build check will produce **N build
-variants** — e.g. `-march=znver2` for AMD and `-march=x86-64-v2` for Intel. A
-matrix is a **fan-out dimension of the build check**: not a new check, not a
-separate pipeline. The enforcement model is unchanged — `build` is blocking
-and fails if *any* variant fails; the build report aggregates per variant.
+One build check produces **N build variants** — e.g. `-march=znver2` for AMD
+and `-march=x86-64-v2` for Intel. A matrix is a **fan-out dimension of the
+build check**: not a new check, not a separate pipeline. The reusable
+workflow (Option A) parses `checks.build.matrix` and launches **one parallel
+runner pod per variant** (`build (amd-znver2)`, …), each calling the module
+with `--variant=<id>`. The enforcement model is unchanged — `build` is
+blocking and fails if *any* variant pod fails (`needs.build.result` is the
+matrix aggregate); the build report folds the per-variant results into one
+`build` entry (worst status wins, per-variant detail under
+`details.variants`).
 
 ```yaml
 checks:
@@ -132,28 +135,45 @@ checks:
       autogen:   ./autogen.sh
       configure: export CFLAGS="-O3 -march=${MARCH} -pthread" ; ./configure --with-curl
       make:      make clean && make -j"$(nproc)"
-    matrix:
-      - id: amd-znver2
-        env: { MARCH: znver2 }
-      - id: intel-x86-64v2
-        env: { MARCH: x86-64-v2 }
+    matrix:                    # MAPPING keyed by variant id
+      amd-znver2:
+        env:
+          MARCH: znver2
+      intel-x86-64v2:
+        env:
+          MARCH: x86-64-v2
 ```
 
-- No `matrix:` → a single implicit variant (exactly today's behavior).
+Single-line flow mappings are also accepted by the module parser
+(`env: { MARCH: znver2 }`); block form is the canonical example.
+
+- No `matrix:` → a single implicit `default` variant (identical to
+  pre-matrix behavior; payload carries no `variant` field).
 - **The patch stage is not a matrix dimension**: `patches/*.patch` applies
   (glob order, `patch -p1`) identically before the hook chain of **every**
   variant. Variant-specific patching is not supported yet (a `patch:` hook
-  key / per-variant patch globs are candidates for the matrix machinery).
-- Variants fan out per the mechanism chosen (module loop or workflow
-  fan-out); each emits `TRUENORTH_RESULT` with a `variant:` field added to
-  the payload, and runs the full declared chain
-  `patch → autogen → configure → make`.
-- Env vars are exported before the hook chain runs, so the hook lines read
-  `$MARCH` and stay variant-unaware otherwise.
-- `truenorth-exceptions.yaml` can target a single variant
-  (`check: build`, `variant: intel-x86-64v2`).
-- Digest handoff: image-producing variants push `:sha-<variant>`; test-plane
-  checks declare which variant they consume (default: the first).
+  key / per-variant patch globs are candidates).
+- Each variant runs the full declared chain
+  `patch → autogen → configure → make` and emits `TRUENORTH_RESULT` with a
+  `variant:` field added to the payload.
+- The variant's `env` is exported before the hook chain, so the hook lines
+  read `$MARCH` and stay variant-unaware otherwise; a variant's `hooks:`
+  override the base hooks per slot (dagger-checks-c@v1.1.2).
+- Unknown variant id passed by the workflow → module hard-errors naming the
+  declared ids; a matrix that is not a mapping fails at `config` with a
+  `::error::`.
+- Artifacts are variant-scoped (`check-result-build-<variant>`,
+  `image-digest-<variant>`) and result files are
+  `results/build--<variant>.json`, so parallel pods cannot overwrite each
+  other. Telemetry keeps the legacy job name for the default variant;
+  variants emit `job_name: build/<id>`.
+- Exceptions target the **check**, not a variant — a `build` exception
+  releases every variant. Variant-targeted exceptions are a candidate
+  follow-up.
+- Digest handoff: the test-plane contract is still the single
+  `image-digest-*` handoff. Multi-variant image builds (per-variant
+  `:sha-<variant>` tags + variant-aware test consumption) are pending
+  FR-18/19 digest-set work; compile-only builds are unaffected.
 
 ### Target matrix vs platform matrix
 
