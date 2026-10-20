@@ -137,92 +137,104 @@ jobs:
               emit_stage("config", "fail", 1)
               sys.exit(1)
 
-          checks = cfg.get("checks", {})
-          planes = cfg.get("planes", {})
+          # Fail-net: ANY unexpected exception still emits a config-fail stage line
+          # (e.g. valid-but-non-mapping YAML raising AttributeError on .get) so the
+          # dashboard shows RED, not a misleading gray "not run". SystemExit passes
+          # through unchanged (the explicit fail paths already emitted their line).
+          try:
+              checks = cfg.get("checks", {})
+              planes = cfg.get("planes", {})
 
-          # --- validate the check model (FR-58/59) ----------------------------
-          MODES = {"required", "blocking", "advisory"}
-          errors = []
-          for name, c in checks.items():
-              mode = c.get("mode", "blocking")
-              if mode not in MODES:
-                  errors.append(f"{name}: mode must be one of {sorted(MODES)}, got '{mode}'")
-              if mode == "required" and c.get("enabled", True) is False:
-                  errors.append(f"{name}: required checks can never be disabled — hard stop (FR-59)")
-          if errors:
-              for e in errors:
-                  print(f"::error::truenorth.yaml invalid: {e}")
+              # --- validate the check model (FR-58/59) ----------------------------
+              MODES = {"required", "blocking", "advisory"}
+              errors = []
+              for name, c in checks.items():
+                  mode = c.get("mode", "blocking")
+                  if mode not in MODES:
+                      errors.append(f"{name}: mode must be one of {sorted(MODES)}, got '{mode}'")
+                  if mode == "required" and c.get("enabled", True) is False:
+                      errors.append(f"{name}: required checks can never be disabled — hard stop (FR-59)")
+              if errors:
+                  for e in errors:
+                      print(f"::error::truenorth.yaml invalid: {e}")
+                  emit_stage("config", "fail", 1)
+                  sys.exit(1)
+
+              # --- deep-scan trigger detection (FR-16) ----------------------------
+              deep = (
+                  os.environ.get("DEEP_SCAN_INPUT", "").lower() == "true"
+                  or "deep-scan" in os.environ.get("PR_LABELS", "")
+                  or bool(re.search(r"Deep-Scan:\s*true", os.environ.get("COMMIT_MSG", "")))
+              )
+
+              # --- selection: enabled AND (fast tier OR deep scan OR required) ----
+              # Required checks always run regardless of tier — they are never off.
+              selected = {}
+              for name, c in checks.items():
+                  if not c.get("enabled", True):
+                      continue
+                  mode = c.get("mode", "blocking")
+                  tier = c.get("tier", "fast")
+                  if mode != "required" and tier == "heavy" and not deep:
+                      continue
+                  selected[name] = c
+
+              # Export the parsed check model (truenorth.yaml) as one structured
+              # log line per check — the dashboard's check-catalog source of truth
+              # (FR-45: pipeline results + catalog metadata ARE the dashboard data).
+              for name, c in checks.items():
+                  line = {
+                      "check": name,
+                      "enabled": bool(c.get("enabled", True)),
+                      "mode": c.get("mode", "blocking"),
+                      "tier": c.get("tier", "fast"),
+                      "plane": c.get("plane", "build"),
+                      "deep_scan": deep,
+                      "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                      "commit": os.environ["GITHUB_SHA"],
+                  }
+                  print("TRUENORTH_CONFIG " + json.dumps(line, separators=(",", ":")))
+
+              # Config stage result: truenorth.yaml parsed, validated, model emitted.
+              emit_stage("config", "pass")
+
+              # Every enabled build-plane check EXCEPT `build` becomes a parallel
+              # scan pod. `build` is the digest producer (push + capture digest) —
+              # it owns the handoff contract, so it is its own job, not in the matrix.
+              scan_checks = [k for k, c in selected.items() if c.get("plane", "build") == "build" and k != "build"]
+              test_checks = [k for k, c in selected.items() if c.get("plane") == "test"]
+              build_enabled = "build" in selected
+
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"scan_checks={json.dumps(scan_checks)}\n")
+                  f.write(f"test_checks={json.dumps(test_checks)}\n")
+                  f.write(f"planes={json.dumps(planes)}\n")
+                  f.write(f"build_enabled={str(build_enabled).lower()}\n")
+                  f.write(f"module={cfg.get('pipeline', {}).get('module', '')}\n")
+                  f.write(f"registry={cfg.get('pipeline', {}).get('registry', '')}\n")
+                  f.write(f"deep_scan={str(deep).lower()}\n")
+              print("build scan pods:", scan_checks)
+              print("test pods      :", test_checks)
+              print("build producer :", build_enabled)
+              print("deep scan      :", deep)
+              print("module         :", cfg.get("pipeline", {}).get("module"))
+
+              # Run-level start event, instrumented at the source (real-time).
+              sys.path.insert(0, os.path.join(os.environ.get("GITHUB_WORKSPACE", "."), ".github"))
+              import truenorth_report as tnr
+              tnr.emit_event("tn.run.start", "info", job_name="config",
+                             scan_checks=scan_checks, test_checks=test_checks,
+                             build_enabled=build_enabled, deep_scan=deep,
+                             module=cfg.get("pipeline", {}).get("module", ""))
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"selected_map={json.dumps({k: ('build' if k == 'build' else ('test-checks' if c.get('plane') == 'test' else 'build-checks')) for k, c in selected.items()})}\n")
+          except SystemExit:
+              raise
+          except Exception as e:
+              print(f"::error::config step failed unexpectedly: {type(e).__name__}: {e}")
               emit_stage("config", "fail", 1)
-              sys.exit(1)
+              raise
 
-          # --- deep-scan trigger detection (FR-16) ----------------------------
-          deep = (
-              os.environ.get("DEEP_SCAN_INPUT", "").lower() == "true"
-              or "deep-scan" in os.environ.get("PR_LABELS", "")
-              or bool(re.search(r"Deep-Scan:\s*true", os.environ.get("COMMIT_MSG", "")))
-          )
-
-          # --- selection: enabled AND (fast tier OR deep scan OR required) ----
-          # Required checks always run regardless of tier — they are never off.
-          selected = {}
-          for name, c in checks.items():
-              if not c.get("enabled", True):
-                  continue
-              mode = c.get("mode", "blocking")
-              tier = c.get("tier", "fast")
-              if mode != "required" and tier == "heavy" and not deep:
-                  continue
-              selected[name] = c
-
-          # Export the parsed check model (truenorth.yaml) as one structured
-          # log line per check — the dashboard's check-catalog source of truth
-          # (FR-45: pipeline results + catalog metadata ARE the dashboard data).
-          for name, c in checks.items():
-              line = {
-                  "check": name,
-                  "enabled": bool(c.get("enabled", True)),
-                  "mode": c.get("mode", "blocking"),
-                  "tier": c.get("tier", "fast"),
-                  "plane": c.get("plane", "build"),
-                  "deep_scan": deep,
-                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
-                  "commit": os.environ["GITHUB_SHA"],
-              }
-              print("TRUENORTH_CONFIG " + json.dumps(line, separators=(",", ":")))
-
-          # Config stage result: truenorth.yaml parsed, validated, model emitted.
-          emit_stage("config", "pass")
-
-          # Every enabled build-plane check EXCEPT `build` becomes a parallel
-          # scan pod. `build` is the digest producer (push + capture digest) —
-          # it owns the handoff contract, so it is its own job, not in the matrix.
-          scan_checks = [k for k, c in selected.items() if c.get("plane", "build") == "build" and k != "build"]
-          test_checks = [k for k, c in selected.items() if c.get("plane") == "test"]
-          build_enabled = "build" in selected
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"scan_checks={json.dumps(scan_checks)}\n")
-              f.write(f"test_checks={json.dumps(test_checks)}\n")
-              f.write(f"planes={json.dumps(planes)}\n")
-              f.write(f"build_enabled={str(build_enabled).lower()}\n")
-              f.write(f"module={cfg.get('pipeline', {}).get('module', '')}\n")
-              f.write(f"registry={cfg.get('pipeline', {}).get('registry', '')}\n")
-              f.write(f"deep_scan={str(deep).lower()}\n")
-          print("build scan pods:", scan_checks)
-          print("test pods      :", test_checks)
-          print("build producer :", build_enabled)
-          print("deep scan      :", deep)
-          print("module         :", cfg.get("pipeline", {}).get("module"))
-
-          # Run-level start event, instrumented at the source (real-time).
-          sys.path.insert(0, os.path.join(os.environ.get("GITHUB_WORKSPACE", "."), ".github"))
-          import truenorth_report as tnr
-          tnr.emit_event("tn.run.start", "info", job_name="config",
-                         scan_checks=scan_checks, test_checks=test_checks,
-                         build_enabled=build_enabled, deep_scan=deep,
-                         module=cfg.get("pipeline", {}).get("module", ""))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"selected_map={json.dumps({k: ('build' if k == 'build' else ('test-checks' if c.get('plane') == 'test' else 'build-checks')) for k, c in selected.items()})}\n")
           EOF
 
   # Pipeline unit tests (no dagger, no registry): lock the enforcement model —
