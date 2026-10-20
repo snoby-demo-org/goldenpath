@@ -54,7 +54,7 @@ env:
 # REUSABLE — single machinery copy (Option B). Callers run:
 #   jobs:
 #     truenorth:
-#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v1
+#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2
 #       with:  { deep_scan: ${{ github.event.inputs.deep_scan == 'true' }} }
 #       secrets: inherit
 # Release procedure: bump EVERY internal truenorth-vN ref in this file to the
@@ -86,7 +86,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
 
       # Live per-job spans, exported during the run (outbound to in-cluster collector)
       - name: OpenTelemetry job instrumentation
@@ -252,7 +252,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: snoby-demo-org/goldenpath
-          ref: truenorth-v1
+          ref: truenorth-v2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -283,7 +283,7 @@ jobs:
           fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -393,7 +393,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -519,7 +519,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -627,7 +627,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
