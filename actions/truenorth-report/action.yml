@@ -1,0 +1,17 @@
+name: 'TrueNorth enforcement core'
+description: >-
+  Installs truenorth_report.py (blocks/flags/budget enforcement core) into the
+  caller workspace at .github/truenorth_report.py, so reusable-workflow harness
+  steps can `import truenorth_report` unchanged. Single machinery copy lives
+  HERE in goldenpath — callers never carry this file.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        target="$GITHUB_WORKSPACE/.github/truenorth_report.py"
+        mkdir -p "$(dirname "$target")"
+        cp "$GITHUB_ACTION_PATH/truenorth_report.py" "$target"
+        echo "truenorth-report: installed $(wc -l < "$target") lines from goldenpath@$GITHUB_ACTION_PATH"
