@@ -8,43 +8,63 @@ here (Option B: machinery pinned by tag, recipes owned by the repo).
 
 ## The build contract
 
-The C/C++ build leg executes three stages, in order, inside a pinned
-`ubuntu:24.04` toolchain container (build-essential, autoconf, libcurl,
-libjansson, openssl, libgmp, libhwloc, ccache):
+The C/C++ build check runs inside a pinned `ubuntu:24.04` toolchain container
+(build-essential, autoconf, libcurl, libjansson, openssl, libgmp, libhwloc,
+ccache). The actual stage flow is:
 
 ```
-patch → configure → build(make)
+patch → configure-or-build.sh → make
 ```
 
-Each stage has a hook slot. **Hooks are files in the repo root** — drop them
-in and the pipeline uses them; no config required.
+`make -j"$(nproc)"` **always runs last, in both paths**. Each stage has a
+hook slot. **Hooks are files in the repo root** — drop them in and the
+pipeline uses them; no config required.
 
-### Hook slots
+### Stage flow and hook slots
 
-| Stage | Hook (presence-detected) | Behavior | Failure status |
-|---|---|---|---|
-| patch | `patches/*.patch` | Applied in glob order with `patch -p1` before anything else | `patch_failed` |
-| configure | `autogen.sh` / `./configure` | `autogen.sh` runs first if present (a fresh clone's shipped `configure` can be stale vs `Makefile.am`); else `./configure` | `autogen_failed`, `configure_failed`, `no_configure` |
-| build | `build.sh` | If present it **owns the whole build** (its own configure + make); the generic path does not run. Otherwise generic `make -j"$(nproc)"` | `build_failed`, `make_failed` |
+| # | Stage | Hook (presence-detected) | Behavior | Failure status → failed_stage |
+|---|---|---|---|---|
+| 1 | patch | `patches/*.patch` | Applied in glob order with `patch -p1` before anything else | `patch_failed` → `patch` |
+| 2 | configure | `autogen.sh` + `./configure` — *without* `build.sh` | `autogen.sh` runs first if present (a fresh clone's shipped `configure` can be stale vs `Makefile.am`), then `./configure` runs | `autogen_failed`, `configure_failed` → `configure`; `no_configure` only when neither `autogen.sh` nor an executable `./configure` exists |
+| 2 | build | `build.sh` — *with* `build.sh` | **Replaces the generic configure stage**: `autogen.sh` pre-stage (if present) → `build.sh` | `autogen_failed`, `build_failed` → `build.sh` |
+| 3 | make | — (no hook) | `make -j"$(nproc)"` (or `-j<jobs>` when the workflow passes `jobs`) — runs last in **both** paths | `make_failed` → `make` |
 
 Rules:
 
 - **Presence detection is the default.** No `truenorth.yaml` change needed to
   use a hook.
-- If `build.sh` exists, the check never runs its own configure/make —
-  the script is fully responsible. (`cpuminer-opt-cpupower` builds this way:
-  znver2 flags, static libstdc++, versioned HiveOS packaging.)
-- The check **fails** on any stage failure or when no ELF binary
-  (`cpuminer*` / `minerd*`) is produced. The failing stage's last 60 log
-  lines are surfaced in the error.
+- **`build.sh` replaces only the configure step — `make` still runs after
+  it.** A `build.sh` that leaves the tree unmakeable (distclean, no default
+  target) will pass its own stage and then die with `make_failed`.
+  (`cpuminer-opt-cpupower` builds this way — znver2 flags, static libstdc++,
+  versioned HiveOS packaging — and works because the tree is left
+  make-ready; see [Known wart and follow-up](#known-wart-and-follow-up).)
+- Quirk: an `autogen.sh` failure inside the `build.sh` path reports
+  `failed_stage: "build.sh"` (the stage is selected before the pre-stage
+  runs).
+- The check **fails** on any stage failure or when no ELF binary is
+  produced. The failing stage's last 60 log lines are surfaced in the error.
 - Compiler warnings are counted and reported; they do **not** fail the check.
-- Result contract (FR-7):
 
-  ```
-  TRUENORTH_RESULT {"check":"build","tool":"autotools@ubuntu:24.04",
-                    "status":"pass|fail","failed_stage":...,"warnings":N,
-                    "binary":"…"}
-  ```
+### Result contract (FR-7)
+
+Emitted as a `TRUENORTH_RESULT: {json}` log line **on PASS only** — on
+failure the module raises with the failing stage's log tail instead:
+
+```json
+{"check":"build","tool":"autotools@ubuntu:24.04",
+ "status":"pass","failed_stage":null,"warnings":2,
+ "binary":"cpuminer version 3.9.1 (posix) [clang ...]"}
+```
+
+- `status` is only `pass` or `fail`. The internal `*_failed` strings appear
+  in console `[build] status=...` lines, **not** in the payload.
+- On failure `failed_stage` is one of `patch` / `configure` / `build.sh` /
+  `make`; `null` on pass.
+- `binary` is the first line of the detected binary's `--version` output —
+  not a path. Detection: an executable `cpuminer*` / `minerd*` file within
+  `maxdepth 2` whose first 4 bytes are ELF magic `7f454c46`; no match →
+  failure with `no_binary`.
 
 ### Declared hooks (contract — machinery pending)
 
@@ -60,7 +80,7 @@ build:
   hooks:
     patch:     patches/*.patch   # glob, applied with patch -p1
     configure: autogen.sh        # prep / regeneration stage
-    build:     build.sh          # full takeover; omit → ./configure && make
+    build:     build.sh          # replaces ./configure; make still runs
 ```
 
 - Hook names are **stage names, not tool names** (`patch` / `configure` /
@@ -70,13 +90,15 @@ build:
   `module:` override (swap the whole language module). Reach for `module:`
   only when you need different machinery entirely.
 
-## Matrix builds
+## Matrix builds (contract — machinery pending)
 
-One build check can produce **N build variants** — e.g. `-march=znver2` for
-AMD and `-march=x86-64-v2` for Intel. A matrix is a **fan-out dimension of
-the build check**: not a new check, not a separate pipeline. The enforcement
-model is unchanged — `build` is blocking and fails if *any* variant fails;
-the build report aggregates per variant.
+Nothing here is implemented yet: no module does variant fan-out and no
+`TRUENORTH_RESULT` payload carries a `variant` field today. This section
+documents the target contract. One build check will produce **N build
+variants** — e.g. `-march=znver2` for AMD and `-march=x86-64-v2` for Intel. A
+matrix is a **fan-out dimension of the build check**: not a new check, not a
+separate pipeline. The enforcement model is unchanged — `build` is blocking
+and fails if *any* variant fails; the build report aggregates per variant.
 
 ```yaml
 build:
@@ -123,6 +145,18 @@ a different plane topology, or an unrelated artifact (e.g. firmware + host
 app). That is a second repo/component with its own `truenorth.yaml`. A CPU
 target, libc variant, or flag set never warrants a second pipeline.
 
+## Known wart and follow-up
+
+The `make` stage runs unconditionally after `build.sh` — so a build script
+that fully builds the project (cpuminer-opt-cpupower's does: configure + make
++ packaging) triggers a second, usually no-op `make`. Harmless there, but a
+`build.sh` that leaves the tree unmakeable (e.g. it distcleans or the default
+target does not exist) would turn a successful build into a false
+`make_failed`. Proposed fix (behavior change → `dagger-checks-c` v1.1.1):
+when `build.sh` exists, skip the generic make stage — true takeover semantics
+matching this document's intent. Pending a decision; until then this page
+describes the code as it is.
+
 ## Status
 
 | Piece | Status |
@@ -130,3 +164,4 @@ target, libc variant, or flag set never warrants a second pipeline.
 | Hook slots (presence detection) | **Shipped** — `dagger-checks-c@v1.1.0` |
 | Declared hooks (`hooks:` in truenorth.yaml) | Contract documented; machinery pending |
 | Matrix (`matrix:` fan-out, per-variant results/report/digests) | Contract documented; machinery pending (module env passthrough, reusable-workflow fan-out, report aggregation by variant, digest-set handoff) |
+| `build.sh` → skip generic make (true takeover) | Proposed v1.1.1; pending decision |

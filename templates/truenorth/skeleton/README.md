@@ -28,19 +28,21 @@ TrueNorth enforcement pipeline: config-driven checks where
 
 ## Controlling the build (hooks)
 
-The build check runs `patch → configure → build` in a pinned toolchain
-container. You control it with files in your repo root (presence-detected,
-no config needed):
+The build check runs in a pinned toolchain container with this stage flow:
+`patch → configure (or build.sh) → make`. You control it with files in your
+repo root (presence-detected, no config needed):
 
 - `patches/*.patch` — applied in glob order with `patch -p1` before anything else
 - `autogen.sh` — optional prep/regeneration stage, runs before configure
-- `build.sh` — if present, it **owns the whole build**; otherwise the
-  pipeline runs `./configure && make`
+- `build.sh` — if present, it **replaces the generic `./configure` step**
+  (autogen pre-stage, then `build.sh`); `make` still runs afterward
+- without `build.sh`, the pipeline runs `./configure && make`
 
 The check fails on a failed stage or a missing output binary, reporting the
 failing stage in `TRUENORTH_RESULT`. Multiple build targets (matrix, e.g.
-per-CPU-arch) are declared under `build:` in `.github/truenorth.yaml` —
-contract: goldenpath TechDocs, *"TrueNorth build contract"*.
+per-CPU-arch) declared under `build:` in `.github/truenorth.yaml` are
+**contract only — machinery pending, not yet functional**. Contract doc:
+goldenpath TechDocs, *"TrueNorth build contract"*.
 
 ## Adding a check
 
