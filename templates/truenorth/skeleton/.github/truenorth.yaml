@@ -38,6 +38,20 @@ webhook:
     url: ""
     auth_secret: ""         # name of a repo secret holding the shared secret (FR-26 open Q)
 
+# ---------------------------------------------------------------------------
+# Build leg control (when the build check uses the C/C++ module,
+# dagger-checks-c): the check runs patch → configure → build inside a pinned
+# toolchain container. You control it with files in your repo root —
+# presence-detected, no config needed:
+#   patches/*.patch — applied in glob order with `patch -p1` before anything
+#   autogen.sh      — optional prep/regeneration stage (runs before configure)
+#   build.sh        — if present it OWNS the build (its own configure+make);
+#                     otherwise the pipeline runs ./configure && make -j"$(nproc)"
+# The check fails on any failed stage or when no cpuminer*/minerd* ELF binary
+# is produced; the failing stage is reported via TRUENORTH_RESULT failed_stage.
+# Build variants (matrix, e.g. -march per CPU target) are declared under
+# `build:` — contract: goldenpath TechDocs, "TrueNorth build contract".
+# ---------------------------------------------------------------------------
 checks:
   lint:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }
   sast:              { enabled: true, mode: blocking, tier: fast, plane: build, applies: [any] }

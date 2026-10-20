@@ -12,6 +12,10 @@ Discovered via Backstage's catalog from this repo's `catalog-info.yaml`.
 - [`templates/crypto-node/`](templates/crypto-node/) — **generic crypto node**:
   same scaffold, parameterized for any coin (vendored source + patches +
   Dockerfile + build.sh + systemd).
+- [`templates/truenorth/`](templates/truenorth/) — **TrueNorth enforcement
+  pipeline**: config-driven checks (`.github/truenorth.yaml` is the only file
+  the repo owns), ARC runner planes, Loki/Tempo telemetry. Build-leg control
+  (hook slots & matrix variants): [`docs/truenorth-build-contract.md`](docs/truenorth-build-contract.md).
 
 ## How it works
 
