@@ -1,9 +1,0 @@
-# Don't ship vendored source git history or build artifacts into the image
-${{ values.sourceDir }}/.git
-${{ values.sourceDir }}/src/*.o
-${{ values.sourceDir }}/src/*.a
-${{ values.sourceDir }}/src/node
-${{ values.sourceDir }}/src/cli
-${{ values.sourceDir }}/depends/*
-*.md
-logs_llm/
