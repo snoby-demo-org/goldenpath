@@ -1,0 +1,39 @@
+name: Dagger Checks
+
+# TrueNorth golden-path pipeline — THIN CALLER (Option B).
+#
+# The machinery (config / build-checks matrix / build / test-checks /
+# build-report + the enforcement core) lives ONCE in goldenpath, pinned by tag:
+#
+#   snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
+#
+# This repo owns only its KNOWLEDGE:
+#   .github/truenorth.yaml            — check selection, modes, tiers, module pins,
+#                                       declared build hooks + build matrix
+#   .github/truenorth-exceptions.yaml — declared, auditable exceptions (FR-13)
+#   the project's own build files     — the hooks reference them
+#
+# New machinery = bump the pin below (FR-14); new checks = edit truenorth.yaml
+# only (NFR-2: no workflow change).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deep_scan:
+        description: "Deep scan: also run heavy-tier checks (FR-16)"
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  truenorth:
+    uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
+    with:
+      deep_scan: ${{ github.event.inputs.deep_scan == 'true' }}
+    secrets: inherit
