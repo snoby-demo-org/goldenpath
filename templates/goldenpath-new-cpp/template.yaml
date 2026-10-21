@@ -1,8 +1,8 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: cpp
-  title: C/C++
+  name: goldenpath-new-cpp
+  title: Golden Path — New C/C++ Repo
   description: >-
     Scaffold a NEW C/C++ repo running the TrueNorth enforcement pipeline —
     config-driven checks where .github/truenorth.yaml is the ONLY file the repo

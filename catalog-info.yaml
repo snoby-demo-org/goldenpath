@@ -7,10 +7,10 @@ spec:
   targets:
     - ./templates/civicnet-node/template.yaml
     - ./templates/crypto-node/template.yaml
-    - ./templates/java-gradle/template.yaml
-    - ./templates/cpp/template.yaml
-    - ./templates/golden-path-java/template.yaml
-    - ./templates/golden-path-cpp/template.yaml
+    - ./templates/goldenpath-new-java/template.yaml
+    - ./templates/goldenpath-new-cpp/template.yaml
+    - ./templates/goldenpath-java/template.yaml
+    - ./templates/goldenpath-cpp/template.yaml
     - ./system-goldenpath.yaml
     - ./system-civicnet.yaml
     - ./domain-crypto.yaml

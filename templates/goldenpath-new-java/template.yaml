@@ -1,8 +1,8 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: java-gradle
-  title: Java/Gradle
+  name: goldenpath-new-java
+  title: Golden Path — New Java Repo
   description: >-
     Scaffold a NEW Java/Gradle repo running the TrueNorth enforcement pipeline —
     config-driven checks where .github/truenorth.yaml is the ONLY file the repo

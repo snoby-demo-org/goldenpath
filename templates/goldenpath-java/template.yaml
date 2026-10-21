@@ -1,18 +1,18 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: golden-path-cpp
-  title: Golden Path — C/C++
+  name: goldenpath-java
+  title: Golden Path — Java
   description: >-
-    Onboard an EXISTING C/C++ repo onto the TrueNorth enforcement
-    pipeline — opens a PR that adds .github/truenorth.yaml (autotools build
-    via dagger-checks-c, required/blocking/advisory check model) plus the
+    Onboard an EXISTING Java/Gradle repo onto the TrueNorth enforcement
+    pipeline — opens a PR that adds .github/truenorth.yaml (maven/gradle build
+    via dagger-checks-java, required/blocking/advisory check model) plus the
     thin dagger-checks.yml caller pinned to goldenpath machinery, optional
     docs/TechDocs, and catalog registration. Reference onboarding shape —
-    cpuminer-opt-cpupower. You review and merge the PR.
+    spring-petclinic. You review and merge the PR.
   tags:
-    - c
-    - cpp
+    - java
+    - gradle
     - truenorth
     - golden-path
     - onboarding
@@ -130,10 +130,10 @@ spec:
           - .github/workflows/**
 
     - id: addTruenorthConfig
-      name: Add truenorth.yaml (C/C++ build)
+      name: Add truenorth.yaml (Java build)
       action: fetch:template
       input:
-        url: ./checks/truenorth/c
+        url: ./checks/truenorth/java
         values:
           pipelineModule: ${{ parameters.pipelineModule }}
           registry: ${{ parameters.registry }}
@@ -160,7 +160,7 @@ spec:
         title: '[Backstage] TrueNorth — enforcement pipeline, docs, and catalog registration'
         description: |
           This PR (opened by the Backstage golden-path scaffolder) onboards this
-          repo onto the TrueNorth enforcement pipeline (C/C++ build):
+          repo onto the TrueNorth enforcement pipeline (Java/Gradle build):
 
           - `.github/workflows/dagger-checks.yml` — thin caller pinned to the
             goldenpath TrueNorth machinery (`truenorth-v2.1`).
