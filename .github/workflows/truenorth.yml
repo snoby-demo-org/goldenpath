@@ -44,6 +44,11 @@ env:
   # In-cluster OTel collector (otel namespace) -> Tempo. Outbound-only.
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.otel.svc.cluster.local:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  # Export dagger op-level spans LIVE (as they run, not only at process exit):
+  # a crashed/timed-out check still leaves its partial span tree in Tempo, and
+  # in-flight runs are watchable. The dagger CLI honors the standard OTEL_* env
+  # (dagger.io/dagger/telemetry Detect=true), so this env reaches it directly.
+  OTEL_EXPORTER_OTLP_TRACES_LIVE: "1"
   # LAB: export direct to in-cluster collector - skip the action's 80MB local otelcol download
   OTEL_SHELL_SKIP_LOCAL_COLLECTOR: "TRUE"
   # Quieter progress for CI: 'dots' collapses dagger's span tree to one-char
@@ -56,7 +61,7 @@ env:
 # REUSABLE — single machinery copy (Option B). Callers run:
 #   jobs:
 #     truenorth:
-#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
+#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.2
 #       with:  { deep_scan: ${{ github.event.inputs.deep_scan == 'true' }} }
 #       secrets: inherit
 # Release procedure: bump EVERY internal truenorth-vN ref in this file to the
@@ -89,7 +94,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.2
 
       # Live per-job spans, exported during the run (outbound to in-cluster collector)
       - name: OpenTelemetry job instrumentation
@@ -208,7 +213,7 @@ jobs:
               test_checks = [k for k, c in selected.items() if c.get("plane") == "test"]
               build_enabled = "build" in selected
 
-              # Build matrix (truenorth-v2.1): checks.build.matrix is a mapping
+              # Build matrix (truenorth-v2.2): checks.build.matrix is a mapping
               # {<variant-id>: {env: {...}, hooks: {...}}}. Each id fans out to
               # its own parallel `build` runner pod (workflow-level fan-out —
               # one pod per variant). No matrix: block = single implicit
@@ -279,7 +284,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: snoby-demo-org/goldenpath
-          ref: truenorth-v2.1
+          ref: truenorth-v2.2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -310,7 +315,7 @@ jobs:
           fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -411,7 +416,7 @@ jobs:
   # Digest producer: builds the real image, pushes to the registry, captures
   # the real digest as the handoff artifact the test plane consumes. Launches
   # in parallel with the build-checks scan fan-out (no `needs: build-checks`).
-  # MATRIX (truenorth-v2.1): config fans checks.build.matrix out to one
+  # MATRIX (truenorth-v2.2): config fans checks.build.matrix out to one
   # parallel pod per variant id (build (amd-znver2), ...); each pod calls the
   # module with --variant=<id>. No matrix: block = single "default" variant
   # (job renders as `build (default)`; telemetry keeps the legacy job name).
@@ -428,7 +433,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -561,7 +566,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -670,7 +675,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.1
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.2
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches

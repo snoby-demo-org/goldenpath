@@ -162,7 +162,7 @@ spec:
           repo onto the TrueNorth enforcement pipeline (C/C++ build):
 
           - `.github/workflows/dagger-checks.yml` — thin caller pinned to the
-            goldenpath TrueNorth machinery (`truenorth-v2.1`).
+            goldenpath TrueNorth machinery (`truenorth-v2.2`).
           - `.github/truenorth.yaml` — the ONLY pipeline file this repo owns:
             check selection, required/blocking/advisory modes, declared build
             hooks + build matrix. Fill in the hooks for this project's build.

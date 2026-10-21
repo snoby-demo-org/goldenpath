@@ -112,7 +112,7 @@ The legacy presence path (files in the repo root, below) still applies
 unchanged when no `hooks:` are declared — existing repos see zero behavior
 change.
 
-## Matrix builds (SHIPPED — workflow fan-out, truenorth-v2.1)
+## Matrix builds (SHIPPED — workflow fan-out, truenorth-v2.2)
 
 One build check produces **N build variants** — e.g. `-march=znver2` for AMD
 and `-march=x86-64-v2` for Intel. A matrix is a **fan-out dimension of the

@@ -47,7 +47,7 @@ checks:
       autogen: ./autogen.sh
       configure: export CFLAGS="-O3 ${MARCH:+-march=${MARCH}} ${EXTRA_ARCH} -pthread -funroll-loops -fomit-frame-pointer" ; ./configure
       make: make clean && make -j"$(nproc)"
-    # BUILD MATRIX (truenorth-v2.1): one parallel build pod per id; each runs
+    # BUILD MATRIX (truenorth-v2.2): one parallel build pod per id; each runs
     # the full chain with env exported. Build fails if ANY variant fails.
     # ISA contract note (see wiki truenorth-build-contract): the arch must
     # imply AVX2 and AES/PCLMUL must be explicit (-maes -mpclmul) for

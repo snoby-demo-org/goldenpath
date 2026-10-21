@@ -13,7 +13,7 @@ existing project.
 | Path | Purpose |
 |------|---------|
 | `.github/truenorth.yaml` | The ONLY pipeline file this repo owns — check selection, required/blocking/advisory modes, declared build hooks + build matrix |
-| `.github/workflows/dagger-checks.yml` | Thin caller pinned to the shared goldenpath TrueNorth machinery (`truenorth-v2.1`) |
+| `.github/workflows/dagger-checks.yml` | Thin caller pinned to the shared goldenpath TrueNorth machinery (`truenorth-v2.2`) |
 | `.github/workflows/techdocs.yml` | Publish these docs to Backstage TechDocs (MinIO) |
 | `catalog-info.yaml` | Backstage Component entity (this repo's registry entry) |
 | `docs/` | This documentation |

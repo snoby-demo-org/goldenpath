@@ -5,7 +5,7 @@ name: Dagger Checks
 # The machinery (config / build-checks matrix / build / test-checks /
 # build-report + the enforcement core) lives ONCE in goldenpath, pinned by tag:
 #
-#   snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
+#   snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.2
 #
 # This repo owns only its KNOWLEDGE:
 #   .github/truenorth.yaml            — check selection, modes, tiers, module pins,
@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   truenorth:
-    uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.1
+    uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.2
     with:
       deep_scan: ${{ github.event.inputs.deep_scan == 'true' }}
     secrets: inherit

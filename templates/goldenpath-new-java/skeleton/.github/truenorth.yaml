@@ -47,7 +47,7 @@ checks:
     hooks:
       # resolve: mvn -B -ntp dependency:go-offline
       build: mvn -B -ntp package
-    # BUILD MATRIX (truenorth-v2.1): one parallel build pod per id; JAVA_VERSION
+    # BUILD MATRIX (truenorth-v2.2): one parallel build pod per id; JAVA_VERSION
     # selects the temurin-<v> toolchain image. Build fails if ANY variant fails.
     # matrix:
     #   temurin-17: { env: { JAVA_VERSION: "17" } }
