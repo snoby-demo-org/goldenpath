@@ -27,7 +27,6 @@ spec:
       required:
         - componentId
         - description
-        - repoUrl
       properties:
         componentId:
           title: Component name
