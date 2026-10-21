@@ -74,6 +74,16 @@ spec:
           type: string
           description: Shared Dagger module the pipeline dispatches to
           default: github.com/snoby-demo-org/dagger-checks@v1.0.5
+        buildModule:
+          title: Build language
+          type: string
+          description: Language-specific Dagger module the build check dispatches to
+          default: github.com/snoby-demo-org/dagger-checks-java@v1.0.1
+          oneOf:
+            - const: github.com/snoby-demo-org/dagger-checks-java@v1.0.1
+              title: Java (dagger-checks-java — maven toolchain, JDK selectable per variant)
+            - const: github.com/snoby-demo-org/dagger-checks-c@v1.1.2
+              title: C/C++ (dagger-checks-c — autotools, target matrix via -march)
         registry:
           title: Image registry
           type: string
@@ -112,6 +122,7 @@ spec:
           system: ${{ parameters.system }}
           repoUrl: ${{ parameters.repoUrl }}
           daggerModule: ${{ parameters.daggerModule }}
+          buildModule: ${{ parameters.buildModule }}
           registry: ${{ parameters.registry }}
           buildPlane: ${{ parameters.buildPlane }}
           testPlane: ${{ parameters.testPlane }}
