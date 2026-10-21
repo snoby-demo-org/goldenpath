@@ -16,3 +16,7 @@ spec:
     - ./resource-civicnet-node-data.yaml
     - ./users.yaml
     - ./group-guests.yaml
+    - ./group-aci.yaml
+    - ./system-a2a.yaml
+    - ./system-cards.yaml
+    - ./system-aix.yaml

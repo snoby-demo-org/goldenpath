@@ -1,0 +1,10 @@
+# ACI team group. Owner for ACI-owned systems/components; members are the
+# GitHub users who should appear as the team in the catalog and Owns pages.
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: aci
+  title: ACI
+spec:
+  type: team
+  children: []

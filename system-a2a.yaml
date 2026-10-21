@@ -1,0 +1,11 @@
+# a2a system entity — owned by the ACI group. Onboarded components can set
+# spec.system: a2a to hang off this system in the catalog graph.
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: a2a
+  title: a2a
+  description: a2a — ACI-owned system.
+spec:
+  owner: group:default/aci
+  domain: crypto

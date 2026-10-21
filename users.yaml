@@ -13,3 +13,51 @@ spec:
   profile:
     displayName: snoby
   memberOf: [guests]
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: sai
+  title: Sai
+  annotations:
+    github.com/user-login: sai
+spec:
+  profile:
+    displayName: Sai
+  memberOf: [aci]
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: matt
+  title: Matt
+  annotations:
+    github.com/user-login: matt
+spec:
+  profile:
+    displayName: Matt
+  memberOf: [aci]
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: darryl
+  title: Darryl
+  annotations:
+    github.com/user-login: darryl
+spec:
+  profile:
+    displayName: Darryl
+  memberOf: [aci]
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: andrew
+  title: Andrew
+  annotations:
+    github.com/user-login: andrew
+spec:
+  profile:
+    displayName: Andrew
+  memberOf: [aci]
