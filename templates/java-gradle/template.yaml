@@ -1,0 +1,151 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: java-gradle
+  title: Java/Gradle
+  description: >-
+    Scaffold a NEW Java/Gradle repo running the TrueNorth enforcement pipeline —
+    config-driven checks where .github/truenorth.yaml is the ONLY file the repo
+    owns; secrets/PII/private-key required-class day one, maven build via
+    dagger-checks-java (JDK matrix via JAVA_VERSION), every check a parallel
+    ARC runner pod, per-check logs in Loki + traces in Tempo, run-level build
+    report with error budget.
+  tags:
+    - java
+    - gradle
+    - truenorth
+    - ci
+    - dagger
+    - otel
+    - github-actions
+spec:
+  owner: snoby
+  type: service
+
+  parameters:
+    - title: Component
+      required:
+        - componentId
+        - description
+        - repoUrl
+      properties:
+        componentId:
+          title: Component name
+          type: string
+          description: Unique catalog name for the component (lowercase, e.g. demo-java)
+          ui:autofocus: true
+        description:
+          title: Description
+          type: string
+          description: One-line description shown in the catalog and the README
+        owner:
+          title: Owner
+          type: string
+          description: Catalog owner (group or user)
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        system:
+          title: System
+          type: string
+          description: System the component belongs to (defaults to goldenpath)
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
+          default: goldenpath
+
+    - title: Repository
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: New repository
+          type: string
+          description: The NEW GitHub repo to create; TrueNorth scaffolds the pipeline and registers it in the catalog.
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+            allowedOwners:
+              - snoby-demo-org
+
+    - title: Pipeline wiring
+      description: Where the checks run and which shared Dagger modules they dispatch to. Everything else about the pipeline is owned by the scaffolded repo's .github/truenorth.yaml.
+      properties:
+        daggerModule:
+          title: Dagger checks module (scan checks)
+          type: string
+          description: Language-agnostic Dagger module for lint/sast/pii/secrets scans
+          default: github.com/snoby-demo-org/dagger-checks@v1.0.5
+        buildModule:
+          title: Build module (pinned)
+          type: string
+          description: Java build module pin
+          default: github.com/snoby-demo-org/dagger-checks-java@v1.0.1
+        registry:
+          title: Image registry
+          type: string
+          description: Registry the build (digest producer) pushes to
+          default: zot.viporlab.net/demo
+        buildPlane:
+          title: Build-plane runner label
+          type: string
+          description: ARC runner scale-set label for the build plane (checks + digest producer)
+          default: k8s-runner
+        testPlane:
+          title: Test-plane runner label
+          type: string
+          description: ARC runner scale-set label for the test plane (consumes the digest handoff)
+          default: k8s-runner
+
+  steps:
+    - id: fetch
+      name: Fetch Java/Gradle skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        copyWithoutTemplating:
+          # The pipeline is fully generic (runtime config = truenorth.yaml) and
+          # full of GitHub Actions ${{ }} expressions the template engine
+          # cannot parse — copy verbatim.
+          - .github/workflows/**
+        values:
+          componentId: ${{ parameters.componentId }}
+          description: ${{ parameters.description }}
+          owner: ${{ parameters.owner }}
+          system: ${{ parameters.system }}
+          repoUrl: ${{ parameters.repoUrl }}
+          daggerModule: ${{ parameters.daggerModule }}
+          buildModule: ${{ parameters.buildModule }}
+          registry: ${{ parameters.registry }}
+          buildPlane: ${{ parameters.buildPlane }}
+          testPlane: ${{ parameters.testPlane }}
+
+    - id: publish
+      name: Publish
+      action: publish:github
+      input:
+        description: This is ${{ parameters.componentId }}
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: 'main'
+        repoVisibility: private
+
+    - id: register
+      name: Register
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
+      - title: Pipeline (truenorth.yaml — the file you own)
+        url: ${{ steps.publish.output.remoteUrl }}/blob/main/.github/truenorth.yaml

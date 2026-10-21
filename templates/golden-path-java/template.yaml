@@ -1,0 +1,193 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: golden-path-java
+  title: Golden Path — Java/Gradle
+  description: >-
+    Onboard an EXISTING Java/Gradle repo onto the TrueNorth enforcement
+    pipeline — opens a PR that adds .github/truenorth.yaml (maven/gradle build
+    via dagger-checks-java, required/blocking/advisory check model) plus the
+    thin dagger-checks.yml caller pinned to goldenpath machinery, optional
+    docs/TechDocs, and catalog registration. Reference onboarding shape —
+    spring-petclinic. You review and merge the PR.
+  tags:
+    - java
+    - gradle
+    - truenorth
+    - golden-path
+    - onboarding
+    - dagger
+    - github-actions
+spec:
+  owner: snoby
+  type: service
+
+  parameters:
+    - title: Component
+      required:
+        - componentId
+        - description
+        - repoUrl
+      properties:
+        componentId:
+          title: Component name
+          type: string
+          description: Unique catalog name for the component (lowercase)
+          ui:autofocus: true
+        description:
+          title: Description
+          type: string
+          description: One-line description shown in the catalog
+        owner:
+          title: Owner
+          type: string
+          description: Catalog owner (group or user)
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        system:
+          title: System
+          type: string
+          description: System the component belongs to (defaults to goldenpath)
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
+          default: goldenpath
+
+    - title: Repository
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Existing repository
+          type: string
+          description: >-
+            The EXISTING repo to onboard. Golden path does NOT create it — it
+            opens a PR adding the TrueNorth pipeline/docs/catalog-info onto the
+            repo you already own.
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+            allowedOwners:
+              - snoby
+              - snoby-demo-org
+        targetBranch:
+          title: Target branch
+          type: string
+          description: Branch the golden-path PR targets (defaults to the repo default branch)
+          default: main
+
+    - title: TrueNorth pipeline
+      description: The repo owns only .github/truenorth.yaml; the enforcement machinery lives once in goldenpath and is pinned by tag. Build hooks ship as examples — fill them from the project's own build after merging.
+      properties:
+        pipelineModule:
+          title: Pipeline (scan checks) module
+          type: string
+          description: Language-agnostic Dagger module for lint/sast/pii/secrets scans
+          default: github.com/snoby-demo-org/dagger-checks@v1.0.6
+        registry:
+          title: Image registry
+          type: string
+          description: Registry the build (digest producer) pushes to
+          default: zot.viporlab.net/demo
+        runnerLabel:
+          title: GitHub runner label
+          type: string
+          description: ARC self-hosted runner scale-set label for both planes
+          default: k8s-runner
+        checkDocs:
+          title: Add docs/ + techdocs.yml (TechDocs to MinIO)
+          type: boolean
+          default: true
+
+  steps:
+    - id: fetchBase
+      name: Fetch golden-path skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          componentId: ${{ parameters.componentId }}
+          description: ${{ parameters.description }}
+          owner: ${{ parameters.owner }}
+          system: ${{ parameters.system }}
+          repoUrl: ${{ parameters.repoUrl }}
+          targetBranch: ${{ parameters.targetBranch }}
+
+    - id: addTruenorthCaller
+      name: Add TrueNorth caller workflow
+      action: fetch:template
+      input:
+        url: ./checks/truenorth/caller
+        copyWithoutTemplating:
+          # GitHub Actions ${{ }} expressions cannot be parsed by the template
+          # engine — copy verbatim. The machinery pin (truenorth-vN) is literal;
+          # bumping it is the FR-14 flow.
+          - .github/workflows/**
+
+    - id: addTruenorthConfig
+      name: Add truenorth.yaml (Java build)
+      action: fetch:template
+      input:
+        url: ./checks/truenorth/java
+        values:
+          pipelineModule: ${{ parameters.pipelineModule }}
+          registry: ${{ parameters.registry }}
+          runnerLabel: ${{ parameters.runnerLabel }}
+
+    - id: addDocs
+      name: Add docs + TechDocs workflow
+      if: ${{ parameters.checkDocs }}
+      action: fetch:template
+      input:
+        url: ./checks/docs
+        values:
+          componentId: ${{ parameters.componentId }}
+          description: ${{ parameters.description }}
+          runnerLabel: ${{ parameters.runnerLabel }}
+
+    - id: openPr
+      name: Open golden-path PR
+      action: publish:github:pull-request
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        branchName: backstage-golden-path
+        targetBranchName: ${{ parameters.targetBranch }}
+        title: '[Backstage] TrueNorth — enforcement pipeline, docs, and catalog registration'
+        description: |
+          This PR (opened by the Backstage golden-path scaffolder) onboards this
+          repo onto the TrueNorth enforcement pipeline (Java/Gradle build):
+
+          - `.github/workflows/dagger-checks.yml` — thin caller pinned to the
+            goldenpath TrueNorth machinery (`truenorth-v2.1`).
+          - `.github/truenorth.yaml` — the ONLY pipeline file this repo owns:
+            check selection, required/blocking/advisory modes, declared build
+            hooks + build matrix. Fill in the hooks for this project's build.
+          - `.github/truenorth-exceptions.yaml` — create only when a blocking
+            check needs a declared, auditable exception (FR-13).
+          - `.github/workflows/techdocs.yml` + `docs/` + `mkdocs.yml` (if docs enabled).
+          - `catalog-info.yaml` — Backstage Component entity (catalog registration).
+
+          Secrets/PII scans are required-class day one (never disableable);
+          lint/sast/format start advisory (FR-12 progressive enforcement).
+
+          Review and merge; the component will appear in Backstage after merge.
+
+    - id: register
+      name: Register component
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.openPr.output.remoteUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Golden-path PR
+        url: ${{ steps.openPr.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

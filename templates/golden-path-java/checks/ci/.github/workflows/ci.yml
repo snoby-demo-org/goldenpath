@@ -1,0 +1,28 @@
+name: CI (validate)
+
+# Cheap gate: on push/PR, validate the repo's YAML (catalog-info + workflows)
+# parses. Runs on the self-hosted ARC runner.
+
+on:
+  push:
+    branches:
+      - ${{ values.targetBranch }}
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ${{ values.runnerLabel }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate YAML parses
+        run: |
+          set -e
+          (command -v python3 >/dev/null && pip install -q pyyaml) \
+            || (command -v apt-get >/dev/null && sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip >/dev/null && pip install -q pyyaml) \
+            || echo "WARN: no package manager for YAML parser"
+          for f in catalog-info.yaml .github/workflows/*.yml; do
+            python3 -c "import yaml; yaml.safe_load(open('$f')); print('OK: $f')" || { echo "ERROR: cannot parse $f"; exit 1; }
+          done

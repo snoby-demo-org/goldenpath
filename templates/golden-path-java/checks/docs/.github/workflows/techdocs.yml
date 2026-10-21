@@ -1,0 +1,64 @@
+name: TechDocs Publish
+
+# Generates this repo's TechDocs site (mkdocs -> static HTML) and publishes it
+# to the homelab MinIO (S3) that Backstage reads from. Requires the repo-level
+# TECH_DOCS_* secrets (TECH_DOCS_ACCESS_KEY / TECH_DOCS_SECRET_KEY /
+# TECH_DOCS_S3_ENDPOINT pointing at MinIO). Runs on the self-hosted ARC runner.
+
+on:
+  push:
+    branches:
+      - ${{ values.targetBranch }}
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'catalog-info.yaml'
+      - '.github/workflows/techdocs.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ${{ values.runnerLabel }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install techdocs-cli + mkdocs
+        run: |
+          npm install -g @techdocs/cli
+          pip install mkdocs-techdocs-core
+
+      - name: Resolve entity ref from catalog-info.yaml
+        id: entity
+        run: |
+          NAME=$(grep -E '^\s+name:' catalog-info.yaml | head -1 | awk '{print $2}')
+          KIND=$(grep -E '^kind:' catalog-info.yaml | head -1 | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
+          NAMESPACE=$(grep -E 'namespace:' catalog-info.yaml | head -1 | awk '{print $2}' || echo default)
+          echo "entity=default/${KIND}/${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate TechDocs
+        run: techdocs-cli generate --no-docker --verbose
+
+      - name: Publish TechDocs to MinIO
+        run: |
+          techdocs-cli publish \
+            --publisher-type awsS3 \
+            --storage-name techdocs \
+            --entity "${{ steps.entity.outputs.entity }}" \
+            --awsBucketRootPath ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TECH_DOCS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TECH_DOCS_SECRET_KEY }}
+          AWS_REGION: us-east-1
+          # Custom S3 endpoint (MinIO) — read via env, not a CLI flag.
+          AWS_ENDPOINT_URL: ${{ secrets.TECH_DOCS_S3_ENDPOINT }}

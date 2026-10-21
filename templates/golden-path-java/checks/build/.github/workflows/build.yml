@@ -1,0 +1,45 @@
+name: Build
+
+# Golden-path CI: run the configure + build commands on the self-hosted ARC
+# runner, plus an optional test command. The commands are captured at scaffold
+# time (configureCommand / buildCommand / testCommand), so this same workflow
+# serves any project language/toolchain. The GitHub Actions tab in Backstage
+# shows real runs from this.
+
+on:
+  push:
+    branches:
+      - ${{ values.targetBranch }}
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ values.runnerLabel }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install base build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential
+
+      - name: Configure
+        env:
+          CONFIGURE_CMD: ${{ values.configureCommand }}
+        run: |
+          if [ -n "$CONFIGURE_CMD" ]; then
+            eval "$CONFIGURE_CMD"
+          fi
+
+      - name: Build
+        run: ${{ values.buildCommand }}
+
+      - name: Test
+        env:
+          TEST_CMD: ${{ values.testCommand }}
+        run: |
+          if [ -n "$TEST_CMD" ]; then
+            eval "$TEST_CMD"
+          fi
