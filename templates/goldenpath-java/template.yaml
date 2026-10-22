@@ -180,7 +180,11 @@ spec:
       name: Register component
       action: catalog:register
       input:
-        repoContentsUrl: ${{ steps.openPr.output.remoteUrl }}
+        # publish:github:pull-request's remoteUrl output is the PR HTML URL
+        # (…/pull/N) — the catalog cannot ingest that (400 Bad Request, seen
+        # live onboarding demo-c-002). Build the branch tree URL from the
+        # repoUrl parameter instead. Branch name must match branchName above.
+        repoContentsUrl: 'https://github.com/${{ parameters.repoUrl | replace("github.com?owner=", "") | replace("&repo=", "/") }}/tree/backstage-golden-path'
         catalogInfoPath: '/catalog-info.yaml'
 
   output:
