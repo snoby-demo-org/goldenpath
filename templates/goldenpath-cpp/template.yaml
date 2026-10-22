@@ -148,6 +148,10 @@ spec:
           componentId: ${{ parameters.componentId }}
           description: ${{ parameters.description }}
           runnerLabel: ${{ parameters.runnerLabel }}
+          # docs/ci/build skeletons trigger on the target branch; without this
+          # value the rendered `branches:` list is EMPTY and the workflow fails
+          # immediately on push (seen live onboarding demo-c-002).
+          targetBranch: ${{ parameters.targetBranch }}
 
     - id: openPr
       name: Open golden-path PR
