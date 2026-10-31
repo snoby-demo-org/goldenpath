@@ -54,11 +54,11 @@ jobs:
           techdocs-cli publish \
             --publisher-type awsS3 \
             --storage-name techdocs \
-            --entity "${{ steps.entity.outputs.entity }}" \
+            --entity "{% raw %}${{ steps.entity.outputs.entity }}{% endraw %}" \
             --awsBucketRootPath ''
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.TECH_DOCS_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.TECH_DOCS_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: {% raw %}${{ secrets.TECH_DOCS_ACCESS_KEY }}{% endraw %}
+          AWS_SECRET_ACCESS_KEY: {% raw %}${{ secrets.TECH_DOCS_SECRET_KEY }}{% endraw %}
           AWS_REGION: us-east-1
           # Custom S3 endpoint (MinIO) — read via env, not a CLI flag.
-          AWS_ENDPOINT_URL: ${{ secrets.TECH_DOCS_S3_ENDPOINT }}
+          AWS_ENDPOINT_URL: {% raw %}${{ secrets.TECH_DOCS_S3_ENDPOINT }}{% endraw %}
