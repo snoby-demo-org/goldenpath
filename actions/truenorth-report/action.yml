@@ -15,3 +15,26 @@ runs:
         mkdir -p "$(dirname "$target")"
         cp "$GITHUB_ACTION_PATH/truenorth_report.py" "$target"
         echo "truenorth-report: installed $(wc -l < "$target") lines from goldenpath@$GITHUB_ACTION_PATH"
+
+    # Dagger engine trust for the LAN registry (zot behind a self-signed CA).
+    # `dagger call` auto-provisions an engine and injects ~/.config/dagger/
+    # engine.json (v0.16+); `insecure: true` = HTTPS but skip cert verification,
+    # so we don't have to bake the CA into every engine image. Only created if
+    # absent — callers that already ship their own engine.json are untouched.
+    - shell: bash
+      run: |
+        set -euo pipefail
+        cfg="$HOME/.config/dagger/engine.json"
+        if [ -f "$cfg" ]; then
+          echo "truenorth-report: engine.json already present, leaving as-is"
+        else
+          mkdir -p "$(dirname "$cfg")"
+          cat > "$cfg" <<'JSON'
+        {
+          "registries": {
+            "registry.viporlab.net": { "insecure": true }
+          }
+        }
+        JSON
+          echo "truenorth-report: wrote $cfg (registry.viporlab.net insecure-skip-verify)"
+        fi
