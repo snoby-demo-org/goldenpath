@@ -15,6 +15,12 @@ runs:
         mkdir -p "$(dirname "$target")"
         cp "$GITHUB_ACTION_PATH/truenorth_report.py" "$target"
         echo "truenorth-report: installed $(wc -l < "$target") lines from goldenpath@$GITHUB_ACTION_PATH"
+        # Commit marker for dagger modules: dagger's directory sync EXCLUDES
+        # .git, so modules can't `git rev-parse` the checkout. Write the sha to
+        # a file the module reads for digest/staging tags (sha-<commit>).
+        if git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$GITHUB_WORKSPACE/.truenorth_commit" 2>/dev/null; then
+          echo "truenorth-report: commit marker $(cat "$GITHUB_WORKSPACE/.truenorth_commit")"
+        fi
 
     # Dagger engine trust for the LAN registry (zot behind a self-signed CA).
     # `dagger call` auto-provisions an engine and injects ~/.config/dagger/
