@@ -125,6 +125,42 @@ class AdvisoryContinues(unittest.TestCase):
         # check finds build errors (FR-59/60)
         self.assertEqual(tn.harness_exit_code("advisory", 3), 0)
 
+    def test_advisory_declared_fail_still_exits_green(self):
+        # truenorth-v2.6: a check that DECLARES fail via its contract line
+        # (TRUENORTH_RESULT status=fail, rc == 0) never blocks an advisory
+        # leg — findings are flagged, pipeline continues (FR-59/60)
+        self.assertEqual(tn.harness_exit_code("advisory", 0, "fail"), 0)
+
+    def test_blocking_honors_declared_fail(self):
+        # truenorth-v2.6: blocking/required legs honor a declared failure
+        # even at rc == 0; a nonzero rc stays authoritative; no declaration
+        # means rc-only, exactly as before
+        self.assertEqual(tn.harness_exit_code("blocking", 0, "fail"), 1)
+        self.assertEqual(tn.harness_exit_code("required", 0, "fail"), 1)
+        self.assertEqual(tn.harness_exit_code("blocking", 2, "fail"), 2)
+        self.assertEqual(tn.harness_exit_code("blocking", 0), 0)
+        self.assertEqual(tn.harness_exit_code("blocking", 0, "pass"), 0)
+
+    def test_declared_fail_with_zero_rc_fails(self):
+        # truenorth-v2.6: TRUENORTH_RESULT status=fail with rc==0 — the
+        # contract is honored (this is how lint reports 77 findings without
+        # raising an "Unhandled exception" traceback)
+        r = tn.build_result("lint", {"mode": "advisory", "tier": "fast"}, 0, 1234,
+                            1, "c", "build/lint", declared_status="fail")
+        self.assertEqual(r["status"], "fail")
+        self.assertEqual(r["exit_code"], 0)
+
+    def test_rc_fail_cannot_be_upgraded(self):
+        # FR-59: a leg that dies before reporting cannot prove itself clean —
+        # a declared pass never overrides a nonzero rc
+        r = tn.build_result("lint", {"mode": "blocking"}, 1, 1234, 1, "c",
+                            "build/lint", declared_status="pass")
+        self.assertEqual(r["status"], "fail")
+
+    def test_no_declaration_is_rc_driven(self):
+        r = tn.build_result("lint", {"mode": "advisory"}, 0, 10, 1, "c", "build/lint")
+        self.assertEqual(r["status"], "pass")
+
     def test_advisory_disabled_is_silent(self):
         c = cfg()
         c["format"]["enabled"] = False

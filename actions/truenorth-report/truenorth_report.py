@@ -72,23 +72,36 @@ def emit_event(event, level="info", check="", job_name="", **payload):
         print(f"::warning::tn_emit {event} failed: {exc}", file=sys.stderr)
 
 
-def harness_exit_code(mode, returncode):
-    """Exit decision for a check leg (FR-59/60): an advisory check that found
-    build errors records them and exits GREEN so the pipeline continues;
-    required/blocking failures propagate their exit code (job goes red)."""
-    if mode == "advisory" and returncode != 0:
+def harness_exit_code(mode, returncode, declared_status=None):
+    """Exit decision for a check leg (FR-59/60): an advisory check never
+    blocks — its findings are recorded as flags in the build report;
+    required/blocking failures propagate their exit code (job goes red).
+    truenorth-v2.6: a check may also DECLARE failure via its contract line
+    (TRUENORTH_RESULT "status": "fail") while exiting zero — blocking/required
+    legs honor that declaration; advisory legs still exit green."""
+    if mode == "advisory":
         return 0
-    return returncode
+    if returncode != 0:
+        return returncode
+    return 1 if declared_status == "fail" else 0
 
 
 def build_result(check, cfg, returncode, duration_ms, run_id, commit, job,
-                 score=None, findings=None, details=None, variant=None):
+                 score=None, findings=None, details=None, variant=None,
+                 declared_status=None):
     """Check contract (FR-7/FR-11): the structured result every check leg emits.
     Matrix variants (truenorth-v2.1): variant=<id> adds a "variant" field
-    (None for the implicit single variant — payload unchanged there)."""
+    (None for the implicit single variant — payload unchanged there).
+    truenorth-v2.6: declared_status (from the check's TRUENORTH_RESULT contract
+    line) may declare fail while rc==0 — honored in status, but rc can never
+    upgrade a declared failure to pass, and a crashed leg (rc != 0) always
+    fails regardless of what it declared (FR-59: a leg that dies before
+    reporting cannot prove itself clean)."""
+    rc_fail = returncode != 0
+    declared_fail = declared_status == "fail"
     result = {
         "check": check,
-        "status": "pass" if returncode == 0 else "fail",
+        "status": "fail" if (rc_fail or declared_fail) else "pass",
         "mode": cfg.get("mode", "blocking"),
         "tier": cfg.get("tier", "fast"),
         "score": score, "findings": findings,

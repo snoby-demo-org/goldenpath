@@ -61,7 +61,7 @@ env:
 # REUSABLE — single machinery copy (Option B). Callers run:
 #   jobs:
 #     truenorth:
-#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.4
+#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.6
 #       with:  { deep_scan: ${{ github.event.inputs.deep_scan == 'true' }} }
 #       secrets: inherit
 # Release procedure: bump EVERY internal truenorth-vN ref in this file to the
@@ -94,7 +94,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.4
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
 
       # Live per-job spans, exported during the run (outbound to in-cluster collector)
       - name: OpenTelemetry job instrumentation
@@ -317,7 +317,7 @@ jobs:
           fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.4
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -387,12 +387,14 @@ jobs:
           # FR-7/FR-11): a line "TRUENORTH_RESULT: {json}" anywhere in output.
           plain = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out)
           score, findings, details = None, None, {}
+          declared = None
           m = re.search(r"TRUENORTH_RESULT:\s*(\{.*\})", plain)
           if m:
               try:
                   payload = json.loads(m.group(1))
                   score = payload.get("score")
                   findings = payload.get("findings")
+                  declared = payload.get("status")
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
@@ -402,7 +404,8 @@ jobs:
                                    run_id=int(os.environ["GITHUB_RUN_ID"]),
                                    commit=os.environ["GITHUB_SHA"],
                                    job=os.environ.get("TN_JOB_NAME", f"build/{check}"),
-                                   score=score, findings=findings, details=details)
+                                   score=score, findings=findings, details=details,
+                                   declared_status=declared)
           tn.write_result(result, out)
 
           print("TRUENORTH_CHECK_RESULT " + json.dumps(result, separators=(",", ":")), flush=True)
@@ -411,9 +414,9 @@ jobs:
                         mode=mode, tier=tier, status=result["status"], duration_ms=dur)
 
           # Advisory findings never block (FR-59/60): record and exit green.
-          if mode == "advisory" and rc != 0:
+          if mode == "advisory" and (rc != 0 or declared == "fail"):
               print(f"::warning::advisory check '{check}' failed — recorded as flag in the build report, does not block")
-          sys.exit(tn.harness_exit_code(mode, rc))
+          sys.exit(tn.harness_exit_code(mode, rc, declared))
           HARNESS
 
       - name: Upload check result artifact
@@ -444,7 +447,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.4
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -508,12 +511,14 @@ jobs:
 
           plain = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out)
           score, findings, details = None, None, {}
+          declared = None
           m = re.search(r"TRUENORTH_RESULT:\s*(\{.*\})", plain)
           if m:
               try:
                   payload = json.loads(m.group(1))
                   score = payload.get("score")
                   findings = payload.get("findings")
+                  declared = payload.get("status")
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
@@ -538,7 +543,8 @@ jobs:
                                    commit=os.environ["GITHUB_SHA"],
                                    job=os.environ.get("TN_JOB_NAME", f"build/{check}"),
                                    score=score, findings=findings, details=details,
-                                   variant=None if variant == "default" else variant)
+                                   variant=None if variant == "default" else variant,
+                                   declared_status=declared)
           tn.write_result(result, out)
           if digest:
               with open("digest.txt", "w") as f:
@@ -550,7 +556,7 @@ jobs:
                         check=check, job_name=os.environ.get("TN_GH_JOB", ""),
                         mode=mode, tier=tier, status=result["status"], duration_ms=dur,
                         digest=details.get("digest"), variant=variant)
-          sys.exit(tn.harness_exit_code(c.get("mode", "blocking"), rc))
+          sys.exit(tn.harness_exit_code(c.get("mode", "blocking"), rc, declared))
           HARNESS
 
       - name: Upload digest artifact (build -> test handoff)
@@ -585,7 +591,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.4
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -648,12 +654,14 @@ jobs:
 
           plain = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out)
           score, findings, details = None, None, {}
+          declared = None
           m = re.search(r"TRUENORTH_RESULT:\s*(\{.*\})", plain)
           if m:
               try:
                   payload = json.loads(m.group(1))
                   score = payload.get("score")
                   findings = payload.get("findings")
+                  declared = payload.get("status")
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
@@ -663,7 +671,8 @@ jobs:
                                    run_id=int(os.environ["GITHUB_RUN_ID"]),
                                    commit=os.environ["GITHUB_SHA"],
                                    job=os.environ.get("TN_JOB_NAME", f"test/{check}"),
-                                   score=score, findings=findings, details=details)
+                                   score=score, findings=findings, details=details,
+                                   declared_status=declared)
           tn.write_result(result, out)
 
           print("TRUENORTH_CHECK_RESULT " + json.dumps(result, separators=(",", ":")), flush=True)
@@ -671,9 +680,9 @@ jobs:
                         check=check, job_name=os.environ.get("TN_GH_JOB", ""),
                         mode=mode, tier=tier, status=result["status"], duration_ms=dur)
 
-          if mode == "advisory" and rc != 0:
+          if mode == "advisory" and (rc != 0 or declared == "fail"):
               print(f"::warning::advisory check '{check}' failed — recorded as flag in the build report, does not block")
-          sys.exit(tn.harness_exit_code(mode, rc))
+          sys.exit(tn.harness_exit_code(mode, rc, declared))
           HARNESS
 
       - name: Upload check result artifact
@@ -701,7 +710,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.4
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
