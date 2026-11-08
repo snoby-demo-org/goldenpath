@@ -275,6 +275,7 @@ jobs:
   # build-report BLOCKS on this job failing (TN_UNIT_RESULT).
   unit-tests:
     needs: config
+    timeout-minutes: 20
     runs-on: ${{ fromJSON(needs.config.outputs.planes).build }}
     steps:
       # Machinery tests live WITH the machinery: check out goldenpath at the
@@ -301,6 +302,7 @@ jobs:
   # Source-scope scans have no `needs: build` — they start in parallel with it.
   build-checks:
     needs: config
+    timeout-minutes: 40
     if: needs.config.outputs.scan_checks != '[]'
     strategy:
       fail-fast: false
@@ -430,6 +432,7 @@ jobs:
   # (job renders as `build (default)`; telemetry keeps the legacy job name).
   build:
     needs: config
+    timeout-minutes: 120
     if: needs.config.outputs.build_enabled == 'true'
     strategy:
       fail-fast: false
@@ -570,6 +573,7 @@ jobs:
   # (a failed scan does not cancel its siblings).
   test-checks:
     needs: [config, build]
+    timeout-minutes: 20
     if: ${{ !cancelled() && needs.config.outputs.test_checks != '[]' }}
     strategy:
       fail-fast: false
