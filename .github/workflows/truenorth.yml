@@ -61,7 +61,7 @@ env:
 # REUSABLE — single machinery copy (Option B). Callers run:
 #   jobs:
 #     truenorth:
-#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.6
+#       uses: snoby-demo-org/goldenpath/.github/workflows/truenorth.yml@truenorth-v2.7
 #       with:  { deep_scan: ${{ github.event.inputs.deep_scan == 'true' }} }
 #       secrets: inherit
 # Release procedure: bump EVERY internal truenorth-vN ref in this file to the
@@ -94,7 +94,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.7
 
       # Live per-job spans, exported during the run (outbound to in-cluster collector)
       - name: OpenTelemetry job instrumentation
@@ -285,7 +285,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: snoby-demo-org/goldenpath
-          ref: truenorth-v2.4
+          ref: truenorth-v2.7
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -317,7 +317,7 @@ jobs:
           fetch-depth: 2
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.7
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -398,7 +398,11 @@ jobs:
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
-                  print("::warning::TRUENORTH_RESULT line was not valid JSON — ignored")
+                  # fail-safe (review finding): an unparseable contract line
+                  # must not mint a pass — with rc==0 (declared-fail checks
+                  # return normally) only `declared` carries the verdict.
+                  declared = "fail"
+                  print("::warning::TRUENORTH_RESULT line was not valid JSON — recorded as declared fail")
 
           result = tn.build_result(check, c, rc, dur,
                                    run_id=int(os.environ["GITHUB_RUN_ID"]),
@@ -447,7 +451,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.7
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -522,7 +526,7 @@ jobs:
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
-                  pass
+                  declared = "fail"
 
           # Digest: prefer the contract payload, fall back to parsing stdout.
           digest = details.get("digest")
@@ -591,7 +595,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.7
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches
@@ -665,7 +669,11 @@ jobs:
                   if isinstance(payload.get("details"), dict):
                       details.update(payload["details"])
               except json.JSONDecodeError:
-                  print("::warning::TRUENORTH_RESULT line was not valid JSON — ignored")
+                  # fail-safe (review finding): an unparseable contract line
+                  # must not mint a pass — with rc==0 (declared-fail checks
+                  # return normally) only `declared` carries the verdict.
+                  declared = "fail"
+                  print("::warning::TRUENORTH_RESULT line was not valid JSON — recorded as declared fail")
 
           result = tn.build_result(check, c, rc, dur,
                                    run_id=int(os.environ["GITHUB_RUN_ID"]),
@@ -710,7 +718,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install TrueNorth enforcement core
-        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.6
+        uses: snoby-demo-org/goldenpath/actions/truenorth-report@truenorth-v2.7
 
       - name: OpenTelemetry job instrumentation
         uses: snoby/opentelemetry-github/actions/instrument/job@lab-patches

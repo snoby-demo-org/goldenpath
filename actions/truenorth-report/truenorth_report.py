@@ -98,7 +98,8 @@ def build_result(check, cfg, returncode, duration_ms, run_id, commit, job,
     fails regardless of what it declared (FR-59: a leg that dies before
     reporting cannot prove itself clean)."""
     rc_fail = returncode != 0
-    declared_fail = declared_status == "fail"
+    # case-insensitive so a check emitting "FAIL" can't slip through as pass
+    declared_fail = str(declared_status or "").strip().lower() == "fail"
     result = {
         "check": check,
         "status": "fail" if (rc_fail or declared_fail) else "pass",

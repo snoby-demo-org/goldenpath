@@ -161,6 +161,12 @@ class AdvisoryContinues(unittest.TestCase):
         r = tn.build_result("lint", {"mode": "advisory"}, 0, 10, 1, "c", "build/lint")
         self.assertEqual(r["status"], "pass")
 
+    def test_declared_fail_is_case_insensitive(self):
+        # review finding: "FAIL" must not count as a pass declaration miss
+        r = tn.build_result("lint", {"mode": "advisory"}, 0, 10, 1, "c",
+                            "build/lint", declared_status="FAIL")
+        self.assertEqual(r["status"], "fail")
+
     def test_advisory_disabled_is_silent(self):
         c = cfg()
         c["format"]["enabled"] = False
